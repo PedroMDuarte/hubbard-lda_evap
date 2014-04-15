@@ -310,7 +310,7 @@ class LatticeBeam(GaussBeam):
 
         return uL(self.l)*intensity * latticeBot
     
-    def getV0( self, X, Y, Z):
+    def getS0( self, X, Y, Z):
         """ 
         Returns the lattice depth in microKelvin 
 
@@ -332,7 +332,8 @@ class LatticeBeam(GaussBeam):
         xb,yb,zb = self.transform( X,Y,Z)
         
         gauss = beam( xb,yb,zb, self.w[0], self.w[1], self.l)
-        intensity = (2/np.pi)* self.mW/1000. /self.w[0]/self.w[1] *gauss  # W um^-2
+        intensity = (2/np.pi)* self.mW/1000. /self.w[0]/self.w[1] \
+                    * gauss  # W um^-2
     
         latticeV0  = 4*np.sqrt(self.retro*self.alpha) 
         return np.abs(uL(self.l)*intensity * latticeV0)
@@ -348,14 +349,14 @@ class potential:
     Parameters 
     ----------
     units      :   tuple, two elements.  
-                   - First element is the string which will be used for labeling 
-                     plots.  
+                   - First element is the string which will be used for 
+                     labeling plots.  
                    - Second element is the multiplication factor required to 
                      obtain the desired units. Beams are by default in 
                      microKelvin.   
-                   
   
-    beams      :   list,  this is the list of beams that makes up the potential
+    beams      :   list,  this is the list of beams that makes up the 
+                   potential
 
     """ 
     def __init__(self, beams, **kwargs ):
