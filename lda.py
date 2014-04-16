@@ -86,38 +86,8 @@ from scipy import optimize
 from scipy.interpolate import interp1d
 
 
-# Loading up the phase diagram interpolation functions and some examples of how
-# to use them
-
-from HubbardPhaseDiagramInterp import getFuchsInterp, getHTSEInterp, \
-     getFuchsInterp2, getHTSEInterp2
-
-# The ones without the suffix 2 ONLY work for arrays. 
-# The ones with the suffix 2 are NOT vectorized and can
-# be used for floats. 
-
-if __name__ == '__main__':
-    Temperature = 2.4
-    fdens = getFuchsInterp2( Temperature, name="density")
-    fdoub = getFuchsInterp2( Temperature, name="doublons")
-    fentr = getFuchsInterp2( Temperature, name="entropy")
-    
-    fHdens = getHTSEInterp2( Temperature, name="density")
-    fHdoub = getHTSEInterp2( Temperature, name="doublons")
-    fHentr = getHTSEInterp2( Temperature, name="entropy")
-    
-    print "Temperature = {0:4,.2f}".format(Temperature)
-    Uval = 4. ; muval = 10. 
-    print "U/t = {0:4,.2f}".format(Uval)
-    print "mu  = {0:4,.2f}\n".format(muval)
-    print "Method   {0:>10s}{1:>10s}".format( "Fuchs", "HTSE")
-    print "-"*40
-    print "Density  {0:10,.2f}{1:10,.2f}".format( \
-        float(fdens(Uval, muval)), float(fHdens(Uval, muval)) )
-    print "Doublons {0:10,.2f}{1:10,.2f}".format( \
-        float(fdoub(Uval, muval)), float(fHdoub(Uval, muval)) )
-    print "Entropy  {0:10,.2f}{1:10,.2f}".format( \
-        float(fentr(Uval, muval)), float(fHentr(Uval, muval)) )    
+# Load up the HTSE solutions 
+import htse  
 
 
 #...............
@@ -133,14 +103,32 @@ class lda:
  
     def __init__( self, **kwargs ): 
         self.verbose = kwargs.get('verbose', False)
-        self.ignore_errors = kwargs.get( 'ignore_errors',False) 
+  
+        # Flag to ignore errors related to the slope of the density profile
+        # or the slope of the band bottom 
+        self.ignoreSlopeErrors = kwargs.get( 'ignoreSlopeErrors',False)
+
+        # Flag to ignore errors related to the global chemical potential
+        # spilling into the beams 
+        self.ignoreMuThreshold = kwargs.get('ignoreMuThreshold', False )
 
         # The potential needs to offer a way of calculating the local band 
-        # band structure via provided functions.  The following function
-        # must exist:
+        # band structure via provided functions.  The following functions
+        # and variables must exist:
         # 
+        #  To calculate lda: 
+        #  -  pot.l 
         #  -  pot.bandStructure( X,Y,Z )
-        #  
+        #
+        #  To make plots  
+        #  -  pot.unitlabel
+        #  -  pot.Bottom( X,Y,Z )
+        #  -  pot.LatticeMod( X,Y,Z )
+        #  -  pot.Info() 
+        #  -  pot.EffAlpha()
+        #  -  pot.firstExcited( X,Y,Z )
+        #  -  pot.S0( X,Y,Z )
+ 
         self.pot = kwargs.pop( 'potential', None) 
         if self.pot is None: 
             raise ValueError(\
@@ -151,15 +139,12 @@ class lda:
  
 
 
-        # Initialize temprature, interactions, and functions that will be used 
-        # to calculate the phase diagram
-        self.T = kwargs.get('Temperature', 1.8 )
+        # Initialize temperature.  Temperature is specified in units of 
+        # Er.  For a 7 Er lattice  t = 0.04 Er 
+        self.T = kwargs.get('Temperature', 0.10 ) 
+        # Initialize interactions.
         self.a_s = kwargs.get('a_s',300.)
-        self.fHdens = getHTSEInterp( self.T, name="density")
-        self.fHdoub = getHTSEInterp( self.T, name="doublons")
-        self.fHentr = getHTSEInterp( self.T, name="entropy" )
-        #
-        
+ 
         # Make a cut line along 111 to calculate integrals of the
         # thermodynamic quantities
         direc111 = (np.arctan(np.sqrt(2)), np.pi/4)
@@ -176,11 +161,12 @@ class lda:
         self.Ezero_111, self.tunneling_111, self.onsite_t_111 = \
             self.pot.bandStructure( self.X111, self.Y111, self.Z111)
 
-        # Lowst value of E0 is obtained 
-        self.LowestE0 = np.amin( bandbot_111 )  
-
         # The onsite interactions are scaled up by the scattering length
         self.onsite_t_111 = self.a_s * self.onsite_t_111
+        self.onsite_111 = self.onsite_t_111 * self.tunneling_111
+
+        # Lowst value of E0 is obtained 
+        self.LowestE0 = np.amin( bandbot_111 )  
 
         self.Ezero0_111 = self.Ezero_111.min()
 
@@ -195,14 +181,15 @@ class lda:
         elb = bandbot_111[ positive_r ]  
         elb_slope = np.diff( elb ) < -1e-4
         n_elb_slope = np.sum( elb_slope )
-        if n_elb_slope > 0 and not self.ignore_errors:  
-            msg = "Bottom of the band has a negative slope"
+        if n_elb_slope > 0:
+            msg = "ERROR: Bottom of the band has a negative slope"
             if self.verbose:
                 print msg
                 print elb
                 print np.diff(elb) 
                 print elb_slope
-            raise ValueError(msg) 
+            if not self.ignoreSlopeErrors:  
+                raise ValueError(msg) 
         else: 
             if self.verbose:
                 print "OK: Bottom of the band has positive slope up to r111 = 10 um"
@@ -221,7 +208,7 @@ class lda:
             # units of the tunneling
             self.globalMu = kwargs.get('globalMu', 0.15)
             if  self.globalMu == 'halfMott':
-                self.globalMu = (self.onsite_t_111 * self.tunneling_111).max()/2.
+                self.globalMu = self.onsite_111.max()/2.
         else :
             self.Number = kwargs.get('Natoms', 3e5)
             fN = lambda x : self.getNumber(x)- self.Number
@@ -240,7 +227,72 @@ class lda:
         #---------------------
         # EVAPORATION ENERGIES
         #---------------------
-        self.getEtaEvap()
+        # Calculate energies to estimate eta parameter for evaporation
+        self.globalMuZ0 = self.Ezero0_111 + self.globalMu
+
+        # Make a cut line along 100 to calculate the threshold for evaporation
+        direc100 = (np.pi/2, 0.) 
+        t100, self.X100, self.Y100, self.Z100, lims = \
+            udipole.linecut_points( direc=direc100, extents = 200.)
+
+        # Obtain band structure along the 100 direction
+        bandbot_100, bandtop_100,  self.Ezero_100, self.tunneling_100 = \
+            self.pot.bandStructure( self.X100, self.Y100, self.Z100, \
+                getonsite=False)
+        self.Ezero0_100 = self.Ezero_100.min()
+
+        # evapTH0_100 accounts for situations in which there is a local barrier 
+        # as you move along 100 to the edge 
+        self.evapTH0_100 = bandbot_100.max()
+
+        # Once past the local barrier we calculate the bandbot energy along 
+        # a beam
+        self.beamBOT_100 = bandbot_100[-1]
+
+        #------------------------------------------------
+        # CONTROL THE CHEMICAL POTENTIAL SO THAT IT STAYS 
+        # BELOW THE THRESHOLD FOR EVAPORATION
+        #------------------------------------------------
+        # For a valid scenario we need 
+        #   self.globalMuZ0 < self.beamBOT_100
+        #   self.globalMuZ0 < self.evapTH0_100  
+        # Otherwise the density distribution will spill out into the beams
+        # and the assumption of spherical symmetry won't be valid.
+        if self.globalMuZ0 > self.evapTH0_100:
+            msg = "ERROR: Chemical potential exceeds the evaporation threshold "
+            if self.verbose:
+                print msg
+            if not self.ignoreMuThreshold : 
+                raise ValueError(msg) 
+        elif self.verbose:
+            print "OK: Chemical potential is below evaporation threshold."
+
+        if self.globalMuZ0 > self.beamBOT_100:
+            msg = "ERROR: Chemical potential exceeds the bottom of the band " +\
+                  "along 100"
+            if self.verbose:
+                print msg
+            if not self.ignoreMuThreshold : 
+                raise ValueError(msg) 
+        elif self.verbose:
+            print "OK: Chemical potential is below the bottom of the band " +\
+                  "along 100"
+
+
+        #-----------------------
+        # ESTIMATION OF ETA EVAP
+        #-----------------------
+        mu = self.globalMuZ0 - self.LowestE0 
+        th = self.evapTH0_100 - self.LowestE0
+        self.EtaEvap = th/mu
+        if False: 
+            print "mu global = %.3g" % self.globalMuZ0 
+            print "evap th   = %.3g" % self.evapTH0_100
+            print "lowest E  = %.3g" % self.LowestE0
+            print "mu = %.3g" % mu
+            print "th = %.3g" % th
+            print "eta = %.3g" % (th/mu)
+            print "th-mu = %.3g" % (th-mu)
 
      
     
@@ -284,55 +336,42 @@ class lda:
         Dlabel = r'$D=%.3f$' % ( self.NumberD / self.Number )
         Slabel = r'$S/N=%.2fk_{\mathrm{B}}$' % ( self.Entropy / self.Number )
         return '\n'.join([Nlabel, Dlabel, Slabel]) 
-     
-    def getEtaEvap( self):  
-        # Calculate energies to estimate eta parameter for evaporation
-        self.globalMuZ0 = self.Ezero0_111 + self.globalMu
+    
+    def TrapFreqs( self ): 
+        """
+        This function calculates the effective harmonic trapping frequencies
+        of the potential.  It fits the bottom of the lowest band to a second
+        degree polynomial. 
+        """
 
-        # Make a cut line along 100 to calculate the threshold for evaporation
-        direc100 = (np.pi/2, 0.) 
-        t100, self.X100, self.Y100, self.Z100, lims = \
-            udipole.linecut_points( direc=direc100, extents = 200.)
+        # Fit the first +/- 15 um of the band bottom to a second order
+        # polynomial 
+        direc100 = (np.pi/2., 0.) 
+        direc010 = (np.pi/2., np.pi/2.) 
+        direc001 = (0., np.pi) 
+        nu = []
+        for d in [direc100, direc010, direc001]: 
+            # Make a cut line along d
+            td, Xd, Yd, Zd, limsd = \
+                udipole.linecut_points( direc=d, extents = 15.)
 
-        # Obtain band structure along the 100 direction
-        bandbot_100, bandtop_100,  self.Ezero_100, self.tunneling_100 = \
-            self.pot.bandStructure( self.X100, self.Y100, self.Z100, \
-                getonsite=False)
-        self.Ezero0_100 = self.Ezero_100.min()
+            # Obtain band structure along the d direction
+            bandbot_d, bandtop_d,  Ezero_d, tunneling_d = \
+                self.pot.bandStructure( Xd, Yd, Zd, \
+                    getonsite=False)
 
-        # evapTH0_100 accounts for situations in which there is a local barrier 
-        # as you move along 100 to the edge 
-        self.evapTH0_100 = bandbot_100.max()
+            # Fit with poly
+            z = np.polyfit( td, bandbot_d , 2 )
+            c2 = z[0]  
 
-        # Once past the local barrier we calculate the bandbot energy along 
-        # a beam
-        self.beamBOT_100 = bandbot_100[-1]
+            # A factor equal to h/(m*lambda)  comes out in front 
+            # here we use lengths in um and freqs in Hz.  
+            factor =  C.h  / C.physical_constants['atomic mass constant'][0] \
+                      * 1e12  \
+                     / self.pot.m  / self.pot.l  
 
-        # For a valid scenario we need 
-        #   self.globalMuZ0 < self.beamBOT_100
-        #   self.globalMuZ0 < self.evapTH0_100  
-        # Otherwise the density distribution will spill out into the beams
-        # and the assumption of spherical symmetry won't be valid.  
-        
-
-        # Estimation of eta is done below 
-        mu = self.globalMuZ0 - self.LowestE0 
-        th = self.evapTH0_100 - self.LowestE0
-        self.EtaEvap = th/mu
-        if False: 
-            print "mu global = %.3g" % self.globalMuZ0 
-            print "evap th   = %.3g" % self.evapTH0_100
-            print "lowest E  = %.3g" % self.LowestE0
-            print "mu = %.3g" % mu
-            print "th = %.3g" % th
-            print "eta = %.3g" % (th/mu)
-            print "th-mu = %.3g" % (th-mu)
-
-        #------------------------------------------------
-        # CONTROL THE CHEMICAL POTENTIAL SO THAT IT STAYS 
-        # BELOW THE THRESHOLD FOR EVAPORATION
-        #------------------------------------------------
-        
+            nu.append( (1./2./np.pi) * np.sqrt(c2) * factor )
+        print nu 
     
 
     def getNumber( self, gMu, verbose=False):
@@ -348,6 +387,7 @@ class lda:
         gMuZero = self.Ezero0_111 + gMu
         localMu = gMuZero - self.Ezero_111
         localMu_t = localMu / self.tunneling_111
+        density = htse_dens( self.T, self.tunneling_111, localMu, self.onsite_111)
         density = self.fHdens( self.onsite_t_111, localMu_t )
 
 
@@ -376,16 +416,22 @@ class lda:
         radius_check = 1e-3 
         posradii = self.r111 > radius_check 
         posdens =  density[ posradii ]
-        neg_slope = np.diff( posdens ) > 1e-3
+        neg_slope = np.diff( posdens ) > 1e-4
         n_neg_slope = np.sum( neg_slope )
-        if n_neg_slope > 0 and not self.ignore_errors:  
-            msg = "Radial density profile along 111 has a positive slope"
+
+
+        if n_neg_slope > 0:  
+            msg = "ERROR: Radial density profile along 111 has a positive slope"
             if self.verbose:
-                print "\n\nradius check start = ", radius_check
                 print msg
+                print "\n\nradius check start = ", radius_check
                 print posdens
                 print np.diff( posdens ) > 1e-4
-            raise ValueError(msg) 
+            if not self.ignoreSlopeErrors:
+                raise ValueError(msg)
+        elif self.verbose:
+            print "OK: Radial density profile along 111 decreases " + \
+                  "monotonically."
 
         if False:
             print " posdens len = ",len(posdens)

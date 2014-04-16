@@ -65,7 +65,7 @@ def optimal( **kwargs ) :
               method='bounded' )
     gOptimal =  res.x 
 
-    print gOptimal,
+    print "%.2f"%gOptimal,
 
     potOpt = scubic.sc( allIR=s0, allGR=gOptimal, allIRw=wL, allGRw=wC ) 
     ldaOpt = lda.lda( potential = potOpt, a_s=a_s, globalMu='halfMott')  
@@ -106,41 +106,44 @@ def plotOptimal( datfile, **kwargs ) :
         if dashed is not None:
             for m in dashed:
                 x = np.linspace( x0, x1, 100)
-                ax.plot( x, x/m, ':',lw=2, color='white', alpha=0.9)
+                ax.plot( x, x/m, '--',lw=2, color='black', alpha=1.0)
         
     fig = plt.figure(figsize=(8.,6.5))
     gs  = matplotlib.gridspec.GridSpec(2,2, wspace=0.2, hspace=0.3,\
             left=0.07, right=0.98, bottom=0.08, top=0.94)
     
     
+    eta_contours = kwargs.get('eta_contours', [1.87,2.8, 4.4, 6. ])
     ax  = fig.add_subplot( gs[0,0] )
     i=1; j=2; k=4
-    meshplot( ax, i, j, k, contours = [1.87,2.8, 4.4, 6. ], \
+    meshplot( ax, i, j, k, contours = eta_contours, \
               dashed=[1., optimal_alpha] )     
     ax.set_title('$\eta_{F}$', fontsize=16)
     ax.set_xlabel('$\mathrm{Lattice\ beam\ waist}\ w_{L}\ (\mu\mathrm{m})$')
     ax.set_ylabel('$\mathrm{Compensation\ beam\ waist}\ w_{C}\ (\mu\mathrm{m})$')
 
+    g0_contours = kwargs.get('g0_contours', [1.87,2.8, 4.4, 6. ])
     ax  = fig.add_subplot( gs[0,1] )
     i=1; j=2; k=3
-    meshplot( ax, i, j, k, contours = [1.87,2.8, 4.4, 6. ], \
+    meshplot( ax, i, j, k, contours = g0_contours, \
               dashed=[1., optimal_alpha] )     
     ax.set_title('$g_{0}$', fontsize=16)
     ax.set_xlabel('$\mathrm{Lattice\ beam\ waist}\ w_{L}\ (\mu\mathrm{m})$')
     ax.set_ylabel('$\mathrm{Compensation\ beam\ waist}\ w_{C}\ (\mu\mathrm{m})$')
-    
-    
+   
+    sn_contours = kwargs.get('sn_contours', [1.2, 1.4, 2.4, 3.] ) 
     ax  = fig.add_subplot( gs[1,0] )
     i=1; j=2; k=6
-    meshplot( ax, i, j, k, contours = [1.2, 1.4, 2.4, 3. ], \
+    meshplot( ax, i, j, k, contours = sn_contours, \
               dashed=[1., optimal_alpha] )     
     ax.set_title('$S/N$', fontsize=16)
     ax.set_xlabel('$\mathrm{Lattice\ waist}\ w_{L}\ (\mu\mathrm{m})$')
     ax.set_ylabel('$\mathrm{Compensation\ waist}\ w_{C}\ (\mu\mathrm{m})$')
     
+    num_contours = kwargs.get('num_contours', [1.0, 2.0, 3.4, 4.8, 5.8])
     ax  = fig.add_subplot( gs[1,1] )
     i=1; j=2;  k=5 
-    meshplot( ax, i, j, k, contours = [1.0, 2.0, 3.4, 4.8, 5.8], \
+    meshplot( ax, i, j, k, contours = num_contours, \
               dashed=[1., optimal_alpha], base=1e5 )     
     ax.set_title('$N/10^{5}$', fontsize=16)
     ax.set_xlabel('$\mathrm{Lattice\ waist}\ w_{L}\ (\mu\mathrm{m})$')
