@@ -6,12 +6,15 @@ the density, double occupancy and entropy
 
 import numpy as np
 
-def htse_dens( T, t, mu, U, ignoreLowT=False ):
+minTt = 1.3
+
+def htse_dens( T, t, mu, U, ignoreLowT=False, verbose=True ):
     Tt = np.array(T/t)
-    nerror = np.sum( Tt < 1.6 )
+    nerror = np.sum( Tt < minTt )
     if nerror > 0 :
-        msg = "HTSE ERROR: T/t < 1.6. =>  min(T/t) = %.2f"% Tt.min()
-        print msg 
+        msg = "HTSE ERROR: T/t < %.2f =>  min(T/t) = %.2f"% (minTt, Tt.min())
+        if verbose:
+            print msg 
         if not ignoreLowT:
             raise ValueError(msg)
         
@@ -35,12 +38,13 @@ def htse_dens( T, t, mu, U, ignoreLowT=False ):
     #print term3 
     return  term1 + term2 + term3
 
-def htse_doub( T, t, mu, U, ignoreLowT=False):
+def htse_doub( T, t, mu, U, ignoreLowT=False, verbose=True):
     Tt = np.array(T/t)
-    nerror = np.sum( Tt < 1.6 )
+    nerror = np.sum( Tt < minTt )
     if nerror > 0 :
-        msg = "HTSE ERROR: T/t < 1.6. =>  min(T/t) = %.2f"% Tt.min()
-        print msg 
+        msg = "HTSE ERROR: T/t < %.2f =>  min(T/t) = %.2f"% (minTt, Tt.min())
+        if verbose:
+            print msg 
         if not ignoreLowT:
             raise ValueError(msg)
  
@@ -67,12 +71,13 @@ def htse_doub( T, t, mu, U, ignoreLowT=False):
     return  term1 + term2 + term3
 
 
-def htse_entr( T, t, mu, U, ignoreLowT=False ):
+def htse_entr( T, t, mu, U, ignoreLowT=False, verbose=True ):
     Tt = np.array(T/t)
-    nerror = np.sum( Tt < 1.6 )
+    nerror = np.sum( Tt < minTt )
     if nerror > 0 :
-        msg = "HTSE ERROR: T/t < 1.6 =>  min(T/t) = %.2f"% Tt.min()
-        print msg 
+        msg = "HTSE ERROR: T/t < %.2f =>  min(T/t) = %.2f"% (minTt, Tt.min())
+        if verbose:
+            print msg 
         if not ignoreLowT:
             raise ValueError(msg)
  

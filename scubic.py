@@ -20,6 +20,7 @@ local density approximation.
 
 import numpy as np
 import udipole
+import scipy.constants as C 
 
 
 # Load the interpolation data for band structure 
@@ -202,7 +203,59 @@ class sc( udipole.potential) :
         average green waist. 
         """
         effAlpha = np.mean(sum(self.w,())) / np.mean( sum(self.GRw,())) 
-        return r'$\alpha=%.2f$'%effAlpha
+        return r'$\alpha_{w}=%.2f$'%effAlpha
+
+    def LatticeWaist(self):
+        """
+        Returns the mean lattice waist of the sample
+        """  
+        return np.mean(sum(self.w,())) 
+
+    def TrapFreqsInfo( self ):
+        """
+        Returns a latex string with the information about the trap 
+        frequencies.  
+        """
+        freqs  = self.TrapFreqs()
+        geomean = (freqs[0]*freqs[1]*freqs[2])**(1./3.)
+        return r'$\bar{\nu} = %d\,\mathrm{Hz}$'%geomean
+
+
+    def TrapFreqs( self ): 
+        """
+        This function calculates the effective harmonic trapping frequencies
+        of the potential.  It fits the bottom of the lowest band to a second
+        degree polynomial. 
+        """
+
+        # Fit the first +/- 15 um of the band bottom to a second order
+        # polynomial 
+        direc100 = (np.pi/2., 0.) 
+        direc010 = (np.pi/2., np.pi/2.) 
+        direc001 = (0., np.pi) 
+        nu = []
+        for d in [direc100, direc010, direc001]: 
+            # Make a cut line along d
+            td, Xd, Yd, Zd, limsd = \
+                udipole.linecut_points( direc=d, extents = 15.)
+
+            # Obtain band structure along the d direction
+            bandbot_d, bandtop_d,  Ezero_d, tunneling_d = \
+                self.bandStructure( Xd, Yd, Zd, \
+                    getonsite=False)
+
+            # Fit with poly
+            z = np.polyfit( td, bandbot_d , 2 )
+            c2 = z[0]  
+
+            # A factor equal to h/(m*lambda)  comes out in front 
+            # here we use lengths in um and freqs in Hz.  
+            factor =  C.h  / C.physical_constants['atomic mass constant'][0] \
+                      * 1e12  \
+                     / self.m  / self.l  
+
+            nu.append( (1./2./np.pi) * np.sqrt(c2) * factor )
+        return nu 
 
 
     def Info( self ):
@@ -212,29 +265,33 @@ class sc( udipole.potential) :
         """
         # Lattice
 
-        def beamlabels( V0, w , Type):
+        def beamlabels( V0, w , TypeV, Typew):
             if len(np.unique(V0))==1:
-                Vlabel = '$V_{%s}=%.1fE_{R}$' % (Type, V0[0] )
+                Vlabel = '$%s=%.2fE_{R}$' % (TypeV, V0[0] )
             else:
-                Vlabel = '$V_{%sx}=%.1f, V_{%sy}=%.1f, V_{%sz}=%.1f$' % \
-                          (Type,V0[0],Type,V0[1],Type,V0[2] ) 
+                if 's' in TypeV:
+                    Vlabel = '$s_{x}=%.2f, s_{y}=%.1f, s_{z}=%.1f$' % \
+                          (V0[0],V0[1],V0[2] ) 
+                else:
+                    Vlabel = '$g_{x}=%.2f, g_{y}=%.1f, g_{z}=%.1f$' % \
+                          (V0[0],V0[1],V0[2] ) 
 
              
             waists = sum( w, () ) 
             if len( np.unique( waists )) == 1: 
-                wlabel = '$w_{%s}=%d\,\mu\mathrm{m}$' % (Type, w[0][0] )
+                wlabel = '$w_{%s}=%d\,\mu\mathrm{m}$' % (Typew, w[0][0] )
             else:
                 coords = ['x','y','z']
                 wlabel = ''
                 for i,wp in enumerate(w):
                     wlabel += '$w_{%s%s}=(%d,%d)\,\mu\mathrm{m}%' % \
-                               (Type, coord[i], wp[0], wp[1] ) 
+                               (Typew, coord[i], wp[0], wp[1] ) 
                     if i < 2 : wlabel += '$\mathrm{,}\ $'  
 
             return Vlabel + '$\mathrm{,}\ $' + wlabel
  
-        Llabel = beamlabels( self.s0, self.w, 'L')  
-        Glabel = beamlabels( self.g0, self.GRw, 'G')
+        Llabel = beamlabels( self.s0, self.w, 's_{0}', 'L')  
+        Glabel = beamlabels( self.g0, self.GRw, 'g_{0}', 'C')
 
         return Llabel, Glabel 
 

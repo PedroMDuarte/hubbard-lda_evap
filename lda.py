@@ -87,12 +87,13 @@ from scipy.interpolate import interp1d
 
 
 # Load up the HTSE solutions 
-import htse  
+from htse import htse_dens, htse_doub, htse_entr
 
 
 #...............
 # LDA CLASS 
 #...............
+
 
 class lda:
     """ 
@@ -111,6 +112,14 @@ class lda:
         # Flag to ignore errors related to the global chemical potential
         # spilling into the beams 
         self.ignoreMuThreshold = kwargs.get('ignoreMuThreshold', False )
+
+        # Flag to ignore errors related to low temperatures beyond the reach
+        # of the htse  
+        self.ignoreLowT = kwargs.get('ignoreLowT',False)
+
+        # Flag to ignore errors related to a non-vanishing density 
+        # distribution within the extents 
+        self.ignoreExtents = kwargs.get('ignoreExtents',False)
 
         # The potential needs to offer a way of calculating the local band 
         # band structure via provided functions.  The following functions
@@ -141,9 +150,12 @@ class lda:
 
         # Initialize temperature.  Temperature is specified in units of 
         # Er.  For a 7 Er lattice  t = 0.04 Er 
-        self.T = kwargs.get('Temperature', 0.10 ) 
+        self.T = kwargs.get('Temperature', 0.40 ) 
         # Initialize interactions.
         self.a_s = kwargs.get('a_s',300.)
+
+        # Initialize extents
+        self.extents = kwargs.pop('extents', 40.) 
  
         # Make a cut line along 111 to calculate integrals of the
         # thermodynamic quantities
@@ -151,7 +163,7 @@ class lda:
         unit = vec3(); th = direc111[0]; ph = direc111[1] 
         unit.set_spherical( 1., th, ph); 
         t111, self.X111, self.Y111, self.Z111, lims = \
-            udipole.linecut_points( direc=direc111)
+            udipole.linecut_points( direc=direc111, extents=self.extents)
         # Below we get the signed distance from the origin
         self.r111 =  self.X111*unit[0] + self.Y111*unit[1] + self.Z111*unit[2]
 
@@ -192,7 +204,8 @@ class lda:
                 raise ValueError(msg) 
         else: 
             if self.verbose:
-                print "OK: Bottom of the band has positive slope up to r111 = 10 um"
+                print "OK: Bottom of the band has positive slope up to "\
+                       + "r111 = 10 um"
 
         #------------------------------
         # SET GLOBAL CHEMICAL POTENTIAL 
@@ -302,11 +315,52 @@ class lda:
         # thermodynamic quantities
         gMuZero = self.Ezero0_111 + self.globalMu
         self.localMu_t_111= (gMuZero - self.Ezero_111) / self.tunneling_111
+        self.localMu_111= (gMuZero - self.Ezero_111) 
+
+        localMu = gMuZero - self.Ezero_111
+
+
+        # If the global chemical potential is fixed then the lda
+        # class can have an easier time calculating the necessary
+        # temperature to obtain a certain entropy per particle.
+        # This option is provided here: 
+        if 'globalMu' in kwargs.keys() and 'SN' in kwargs.keys(): 
+            self.SN = kwargs.get('SN', 2.0)
+            
+            fSN = lambda x : self.getEntropy(x) / \
+                             self.getNumber(self.globalMu, x) \
+                                - self.SN
+            if self.verbose: 
+                print "Searching for T => S/N=%.2f, "% self.SN
+            TBrent = kwargs.get('TBrent',(0.08,0.4))
+
+            try:
+                Tres, TbrentResults = \
+                    optimize.brentq(fSN, TBrent[0], TBrent[1], \
+                                xtol=2e-3, rtol=2e-3, full_output=True) 
+                print "Brent T result = %.2f Er" % Tres                
+                self.T = Tres 
+            except:
+                print "Search for S/N=%.2f did not converge"%self.SN
+                print "Temperature will be set at T = %.2f Er" % self.T
+
+
+        # Once the temperature is established we can calculate the ratio
+        # of temperature to chemical potential, with the chem. potential
+        # measured from the lowest energy state
+        self.Tmu = self.T / mu 
+
+        # We define an etaF_star which allows us to control for atoms 
+        # spilling along the beams in situations with non-zero temperature
+        # such as what we can access with HTSE
+        self.etaF_star = self.EtaEvap - self.Tmu*1.4
+            
+
 
         # Obtain trap integrated values of the thermodynamic quantities
-        self.Number  = self.getNumber( self.globalMu )
-        self.NumberD = self.getNumberD()
-        self.Entropy = self.getEntropy()
+        self.Number  = self.getNumber( self.globalMu, self.T )
+        self.NumberD = self.getNumberD( self.T )
+        self.Entropy = self.getEntropy( self.T)
 
  
 
@@ -317,64 +371,63 @@ class lda:
         Returns a latex string with the information pertinent to the 
         hubbard parameters
         """
+        # Tunneling label 
+        tmin = self.tunneling_111.min()  
+        tmin_kHz = tmin * 29.2 
+        tlabel = '$t=%.2f\,\mathrm{kHz}$'%(tmin_kHz)
         # Scattering length
         aslabel = '$a_{s}=%.0fa_{0}$' % self.a_s 
         # U/t label 
         Utlabel = '$U/t=%.1f$' % self.onsite_t_111.max()
         # Temperature label
-        Tlabel = '$T/t=%.1f$' % self.T
+        Tlabel = '$T/t=%.1f$' % (self.T/self.tunneling_111).max()
 
-        LDAlabel = '\n'.join( [aslabel, Utlabel, Tlabel ] ) 
+        LDAlabel = '\n'.join( [ aslabel, Utlabel, Tlabel, tlabel ] ) 
         return LDAlabel    
 
     def ThermoInfo( self ):
         """
         Returns a latex string with the information pertinent to the 
         calculated  thermodynamic quantities. 
-        """ 
+        """
+        wLs = self.pot.w 
+        waists = sum( wLs, ())
+        wL = np.mean(waists)  
+
+        rlabel = r'$\mathrm{HWHM} = %.2f\,w_{L}$' % ( self.getRadius()/wL  )  
         Nlabel = r'$N=%.2f\times 10^{5}$' % (self.Number/1e5)
         Dlabel = r'$D=%.3f$' % ( self.NumberD / self.Number )
         Slabel = r'$S/N=%.2fk_{\mathrm{B}}$' % ( self.Entropy / self.Number )
-        return '\n'.join([Nlabel, Dlabel, Slabel]) 
+        return '\n'.join([rlabel, Nlabel, Dlabel, Slabel]) 
     
-    def TrapFreqs( self ): 
+   
+    def getRadius( self ):
         """
-        This function calculates the effective harmonic trapping frequencies
-        of the potential.  It fits the bottom of the lowest band to a second
-        degree polynomial. 
+        This function calculates the HWHM (half-width at half max) of the 
+        density distribution.    
         """
+        gMu = self.globalMu
+        T   = self.T
 
-        # Fit the first +/- 15 um of the band bottom to a second order
-        # polynomial 
-        direc100 = (np.pi/2., 0.) 
-        direc010 = (np.pi/2., np.pi/2.) 
-        direc001 = (0., np.pi) 
-        nu = []
-        for d in [direc100, direc010, direc001]: 
-            # Make a cut line along d
-            td, Xd, Yd, Zd, limsd = \
-                udipole.linecut_points( direc=d, extents = 15.)
+        gMuZero = self.Ezero0_111 + gMu
+        localMu = gMuZero - self.Ezero_111
+        density = htse_dens( T, self.tunneling_111, localMu, \
+                      self.onsite_111, ignoreLowT=self.ignoreLowT, \
+                      verbose=self.verbose)
+        posradii = self.r111 >= 0. 
+        r111pos = self.r111[ posradii]  
+        posdens =  density[ posradii ]
+ 
+        try:
+            hwhm = r111pos[ posdens - posdens[0]/2. < 0.][0]
+            return  hwhm 
+        except:
+            print r111pos
+            print posdens 
+            raise
 
-            # Obtain band structure along the d direction
-            bandbot_d, bandtop_d,  Ezero_d, tunneling_d = \
-                self.pot.bandStructure( Xd, Yd, Zd, \
-                    getonsite=False)
 
-            # Fit with poly
-            z = np.polyfit( td, bandbot_d , 2 )
-            c2 = z[0]  
-
-            # A factor equal to h/(m*lambda)  comes out in front 
-            # here we use lengths in um and freqs in Hz.  
-            factor =  C.h  / C.physical_constants['atomic mass constant'][0] \
-                      * 1e12  \
-                     / self.pot.m  / self.pot.l  
-
-            nu.append( (1./2./np.pi) * np.sqrt(c2) * factor )
-        print nu 
-    
-
-    def getNumber( self, gMu, verbose=False):
+    def getNumber( self, gMu, T, verbose=False):
         """ 
         This function calculates and returns the total number of atoms.  
         It integrates along 111 assuming a spherically symmetric sample. 
@@ -387,8 +440,9 @@ class lda:
         gMuZero = self.Ezero0_111 + gMu
         localMu = gMuZero - self.Ezero_111
         localMu_t = localMu / self.tunneling_111
-        density = htse_dens( self.T, self.tunneling_111, localMu, self.onsite_111)
-        density = self.fHdens( self.onsite_t_111, localMu_t )
+        density = htse_dens( T, self.tunneling_111, localMu, \
+                      self.onsite_111, ignoreLowT=self.ignoreLowT, \
+                      verbose=self.verbose)
 
 
         # Under some circumnstances the green compensation can 
@@ -421,7 +475,8 @@ class lda:
 
 
         if n_neg_slope > 0:  
-            msg = "ERROR: Radial density profile along 111 has a positive slope"
+            msg = "ERROR: Radial density profile along 111 " + \
+                  "has a positive slope"
             if self.verbose:
                 print msg
                 print "\n\nradius check start = ", radius_check
@@ -432,33 +487,51 @@ class lda:
         elif self.verbose:
             print "OK: Radial density profile along 111 decreases " + \
                   "monotonically."
-
         if False:
             print " posdens len = ",len(posdens)
             print " n_neg_slope = ",n_neg_slope
+
+        # Checks that the density goes to zero within the current extents
+        if posdens[-1]/posdens[0] > 2e-2:
+            msg = "ERROR: Density does not vanish within current " + \
+                  "extents"
+            if not self.ignoreExtents:
+                print msg
+                print posdens[0]
+                print posdens[-1]
+                print self.pot.g0
+                print "etaF = ", self.EtaEvap
+                print "etaFstar = ", self.etaF_star
+                print "extents = ", self.extents
+                raise ValueError(msg)
+
          
         dens = density[~np.isnan(density)]
         r = self.r111[~np.isnan(density)]
         return np.power(self.a,-3)*2*np.pi*integrate.simps(dens*(r**2),r)
 
-    def getNumberD( self):
+    def getNumberD( self, T):
         """ 
         This function calculates and returns the total number of doublons. 
         It integrates along 111 assuming a spherically symmetric sample. 
 
         """
-        doublons = self.fHdoub( self.onsite_t_111, self.localMu_t_111 ) 
+        doublons = htse_doub( T, self.tunneling_111, self.localMu_111,\
+                              self.onsite_111, ignoreLowT=self.ignoreLowT,\
+                              verbose=self.verbose) 
         doub = doublons[~np.isnan(doublons)]
         r = self.r111[~np.isnan(doublons)]
         return 2.*np.power(self.a,-3)*2*np.pi*integrate.simps(doub*(r**2),r)
     
-    def getEntropy( self):
+    def getEntropy( self, T):
         """ 
         This function calculates and returns the total entropy.  
         It integrates along 111 assuming a spherically symmetric sample. 
 
         """
-        entropy  = self.fHentr( self.onsite_t_111, self.localMu_t_111 ) 
+        entropy  = htse_entr( T, self.tunneling_111, self.localMu_111,\
+                              self.onsite_111, ignoreLowT=self.ignoreLowT,\
+                              verbose=self.verbose) 
         entr = entropy[~np.isnan(entropy)]
         r = self.r111[~np.isnan(entropy)]
         return np.power(self.a,-3)*2*np.pi*integrate.simps(entr*(r**2),r)
@@ -466,12 +539,18 @@ class lda:
 
 
 def plotLine(  lda0, **kwargs):
+    # Flag to ignore errors related to low temperatures beyond the reach
+    # of the htse  
+    ignoreLowT = kwargs.get('ignoreLowT',False)
 
-    figGS = plt.figure(figsize=(6.0,4.2))
+    scale = 0.9
+    figGS = plt.figure(figsize=(6.0*scale,4.2*scale))
     gs3Line = matplotlib.gridspec.GridSpec(2,2,\
-                 width_ratios=[1.6, 1.], height_ratios=[2.0,1],\
-                 wspace=0.25)
-    tightrect = [0.,0.00, 0.95, 0.88]
+                 width_ratios=[1.6, 1.], height_ratios=[2.0,1.4],\
+                 wspace=0.25, 
+                 left=0.13, right=0.90,
+                 bottom=0.15, top=0.78) 
+    tightrect = [0.,0.00, 0.95, 0.84]
 
     Ax1 = []; 
     Ymin =[]; Ymax=[]
@@ -488,32 +567,42 @@ def plotLine(  lda0, **kwargs):
                '001':'$(\mathbf{001})$', \
                '111':'$(\mathbf{111})$' } 
 
-    cutkwargs = kwargs.pop( 'cutkwargs', {} ) 
+    cutkwargs = kwargs.pop( 'cutkwargs', {  } ) 
     cutkwargs['direc'] = direcs[ line_direction ] 
     cutkwargs['ax0label']= labels[ line_direction ]   
+    cutkwargs['extents']= kwargs.pop('extents', 40.)
     t, X,Y,Z, lims = udipole.linecut_points( **cutkwargs ) 
+
+    potkwargs = kwargs.pop( 'potkwargs', {  } ) 
+    potkwargs['direc'] = direcs[ line_direction ] 
+    potkwargs['ax0label']= labels[ line_direction ]   
+    potkwargs['extents']= kwargs.pop('x1lims', (lims[0],lims[1]))[1]
+    tp, Xp,Yp,Zp, lims = udipole.linecut_points( **potkwargs )
+
+     
 
 
     kwargs['suptitleY'] = 0.96
     kwargs['foottextY'] = 0.84
-   
+  
+    x1lims = kwargs.get('x1lims', (lims[0],lims[1])) 
     
     ax1 = figGS.add_subplot( gs3Line[0:3,0] )
-    ax1.set_xlim( lims[0],lims[1] )
+    ax1.set_xlim( *x1lims )
     ax1.grid()
     ax1.grid(which='minor')
-    ax1.set_xlabel('$\mu\mathrm{m}$ '+cutkwargs['ax0label'], fontsize=16)
-    ax1.set_ylabel( lda0.pot.unitlabel, rotation=0, fontsize=16, labelpad=15 )
-    ax1.xaxis.set_major_locator( matplotlib.ticker.MultipleLocator(40) ) 
-    ax1.xaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(20) ) 
+    ax1.set_xlabel('$\mu\mathrm{m}$ '+cutkwargs['ax0label'], fontsize=13.)
+    ax1.set_ylabel( lda0.pot.unitlabel, rotation=0, fontsize=13., labelpad=15 )
+    ax1.xaxis.set_major_locator( matplotlib.ticker.MultipleLocator(20) ) 
+    ax1.xaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(10) ) 
 
     ax1.yaxis.set_major_locator( matplotlib.ticker.MaxNLocator(7) ) 
     ax1.yaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(1.) ) 
 
     ax2 = figGS.add_subplot( gs3Line[0,1] )
-    ax2.set_xlim( lims[0]/2.,lims[1]/2.)
-    ax2.grid()
-    ax2.set_xlabel('$\mu\mathrm{m}$', fontsize=14, labelpad=0)
+    ax3 = None
+    #ax2.grid()
+    ax2.set_xlabel('$\mu\mathrm{m}$', fontsize=12, labelpad=0)
     #ax2.set_ylabel('$n$', rotation=0, fontsize=14, labelpad=11 )
     ax2.xaxis.set_major_locator( matplotlib.ticker.MultipleLocator(20) ) 
     ax2.xaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(10) ) 
@@ -538,14 +627,36 @@ def plotLine(  lda0, **kwargs):
     excbot_XYZ, exctop_XYZ = lda0.pot.firstExcited( X, Y, Z ) 
 
     # Offset the chemical potential for use in the phase diagram
-    localMu_t_XYZ =  ( lda0.globalMu + lda0.Ezero0_111 - Ezero_XYZ ) \
-                      /  tunneling_XYZ
+    localMu_XYZ =  ( lda0.globalMu + lda0.Ezero0_111 - Ezero_XYZ )
+                      
 
     # Obtain the thermodynamic quantities
-    density_XYZ = lda0.fHdens( onsite_t_XYZ, localMu_t_XYZ ) 
-    doublon_XYZ = lda0.fHdoub( onsite_t_XYZ, localMu_t_XYZ ) 
-    entropy_XYZ = lda0.fHentr( onsite_t_XYZ, localMu_t_XYZ ) 
+    density_XYZ = htse_dens( lda0.T, tunneling_XYZ,  localMu_XYZ, \
+                      onsite_XYZ, ignoreLowT=ignoreLowT ) 
+    doublon_XYZ = htse_doub( lda0.T, tunneling_XYZ,  localMu_XYZ, \
+                      onsite_XYZ, ignoreLowT=ignoreLowT ) 
+    entropy_XYZ = htse_entr( lda0.T, tunneling_XYZ,  localMu_XYZ, \
+                      onsite_XYZ, ignoreLowT=ignoreLowT )
 
+
+    # All the potential lines are recalculated to match the potential
+    # xlims
+    bandbot_XYZp, bandtop_XYZp,  \
+    Ezero_XYZp, tunneling_XYZp, onsite_t_XYZp = \
+        lda0.pot.bandStructure( Xp, Yp, Zp ) 
+    # The onsite interactions are scaled up by the scattering length
+    onsite_t_XYZp = lda0.a_s * onsite_t_XYZp
+
+    onsite_XYZp = onsite_t_XYZp * tunneling_XYZp
+    Ezero0_XYZp = Ezero_XYZp.min()
+
+    bottomp = lda0.pot.Bottom( Xp, Yp, Zp ) 
+    lattmodp = lda0.pot.LatticeMod( Xp, Yp, Zp ) 
+
+    excbot_XYZp, exctop_XYZp = lda0.pot.firstExcited( Xp, Yp, Zp ) 
+
+    # Offset the chemical potential for use in the phase diagram
+    localMu_XYZp =  ( lda0.globalMu + lda0.Ezero0_111 - Ezero_XYZp )
 
      
     #--------------------------
@@ -554,66 +665,73 @@ def plotLine(  lda0, **kwargs):
     # A list of lines to plot is generated 
     # Higher zorder puts stuff in front
     toplot = [ 
-             {'y':(bandbot_XYZ, Ezero_XYZ ), 'color':'blue', 'lw':2., \
+             {'x':tp,\
+              'y':(bandbot_XYZp, Ezero_XYZp ), 'color':'blue', 'lw':2., \
               'fill':True, 'fillcolor':'blue', 'fillalpha':0.75,\
                'zorder':10, 'label':'$\mathrm{band\ lower\ half}$'},
              
-             {'y':(Ezero_XYZ + onsite_XYZ, bandtop_XYZ + onsite_XYZ), \
+             {'x':tp,\
+              'y':(Ezero_XYZp + onsite_XYZp, bandtop_XYZp + onsite_XYZp), \
               'color':'purple', 'lw':2., \
               'fill':True, 'fillcolor':'plum', 'fillalpha':0.75,\
               'zorder':10, 'label':'$\mathrm{band\ upper\ half}+U$'},
               
-             {'y':(excbot_XYZ, exctop_XYZ ), 'color':'red', 'lw':2., \
+             {'x':tp,\
+              'y':(excbot_XYZp, exctop_XYZp ), 'color':'red', 'lw':2., \
               'fill':True, 'fillcolor':'pink', 'fillalpha':0.75,\
                'zorder':2, 'label':'$\mathrm{first\ excited\ band}$'},
              
-             {'y':np.ones_like(X)*lda0.globalMuZ0, 'color':'limegreen',\
+             {'x':tp,\
+              'y':np.ones_like(Xp)*lda0.globalMuZ0, 'color':'limegreen',\
               'lw':2,'zorder':1.9, 'label':'$\mu_{0}$'},
 
-             {'y':np.ones_like(X)*lda0.evapTH0_100, 'color':'#FF6F00', \
+             {'x':tp,\
+              'y':np.ones_like(Xp)*lda0.evapTH0_100, 'color':'#FF6F00', \
               'lw':2,'zorder':1.9, 'label':'$\mathrm{evap\ threshold}$'},
              
-             {'y':bottom,'color':'gray', 'lw':0.5,'alpha':0.5},
-             {'y':lattmod,'color':'gray', 'lw':1.5,'alpha':0.5,\
+             {'x':tp,\
+              'y':bottomp,'color':'gray', 'lw':0.5,'alpha':0.5},
+             {'x':tp,\
+              'y':lattmodp,'color':'gray', 'lw':1.5,'alpha':0.5,\
               'label':r'$\mathrm{lattice\ potential\ \ }\lambda\times10$'} \
              ]  
+ 
+    toplot = toplot + [
+         {'y':density_XYZ, 'color':'blue', 'lw':1.75, \
+          'axis':2, 'label':'$n$'},
 
-    entropy_per_particle = kwargs.pop('entropy_per_particle', False)
-    if entropy_per_particle:
-        toplot = toplot + [                 
-             {'y':entropy_XYZ/density_XYZ,  'color':'black', 'lw':1.75, \
-              'axis':2, 'label':'$s_{N}$'} ] 
-    else:
-        toplot = toplot + [
-             {'y':density_XYZ, 'color':'blue', 'lw':1.75, \
-              'axis':2, 'label':'$n$'},
+         {'y':doublon_XYZ, 'color':'red', 'lw':1.75, \
+          'axis':2, 'label':'$d$'},
 
-             {'y':doublon_XYZ, 'color':'red', 'lw':1.75, \
-              'axis':2, 'label':'$d$'},
+         {'y':entropy_XYZ, 'color':'black', 'lw':1.75, \
+          'axis':2, 'label':'$s_{L}$'},
 
-             {'y':entropy_XYZ, 'color':'black', 'lw':1.75, \
-              'axis':2, 'label':'$s_{L}$'},
+         #{'y':density-2*doublons,  'color':'green', 'lw':1.75, \
+         # 'axis':2, 'label':'$n-2d$'},
 
-             #{'y':density-2*doublons,  'color':'green', 'lw':1.75, \
-             # 'axis':2, 'label':'$n-2d$'},
+         #{'y':self.localMu_t,  'color':'cyan', 'lw':1.75, \
+         # 'axis':2, 'label':r'$\mu$'},
 
-             #{'y':self.localMu_t,  'color':'cyan', 'lw':1.75, \
-             # 'axis':2, 'label':r'$\mu$'},
+         ]
 
-             ]
+    toplot = toplot + [                 
+         {'y':entropy_XYZ/density_XYZ,  'color':'gray', 'lw':1.75, \
+          'axis':3, 'label':'$s_{N}$'} ]
 
     lattlabel = '\n'.join(  list( lda0.pot.Info() ) + \
-                            [lda0.pot.EffAlpha()+\
-                             ', $\eta_{F}=%.2f$'%lda0.EtaEvap] )
-    toplot = toplot + [ {'text':True, 'x': 0., 'y':1.02, 'tstring':lattlabel,
-                         'ha':'left', 'va':'bottom'} ]
+                            [lda0.pot.TrapFreqsInfo() + r',\ ' \
+                             + lda0.pot.EffAlpha(), 
+                             '$\eta_{F}=%.2f$'%lda0.EtaEvap] )
+    toplot = toplot + [ {'text':True, 'x': -0.1, 'y':1.02, 'tstring':lattlabel,
+                         'ha':'left', 'va':'bottom', 'linespacing':1.4} ]
 
     toplot = toplot + [ {'text':True, 'x': 1.0, 'y':1.02, 'tstring':lda0.Info(),
-                         'ha':'right', 'va':'bottom'} ]
+                         'ha':'right', 'va':'bottom', 'linespacing':1.4} ]
  
     toplot = toplot + [ {'text':True, 'x': 0., 'y':1.02, \
                          'tstring':lda0.ThermoInfo(), \
-                         'ha':'left', 'va':'bottom', 'axis':2} ] 
+                         'ha':'left', 'va':'bottom', 'axis':2, \
+                         'linespacing':1.4} ] 
 
     #--------------------------
     # ITERATE AND PLOT  
@@ -627,14 +745,16 @@ def plotLine(  lda0, **kwargs):
             if 'text' in p.keys():
                 whichax = p.get('axis',1)
                 axp = ax2 if whichax ==2 else ax1
+                 
 
                 tx = p.get('x', 0.)
                 ty = p.get('y', 1.)
                 ha = p.get('ha', 'left')
                 va = p.get('va', 'center')
+                ls = p.get('linespacing', 1.)
                 tstring = p.get('tstring', 'empty') 
 
-                axp.text( tx,ty, tstring, ha=ha, va=va,\
+                axp.text( tx,ty, tstring, ha=ha, va=va, linespacing=ls,\
                     transform=axp.transAxes)
             
 
@@ -648,47 +768,74 @@ def plotLine(  lda0, **kwargs):
                            ha='center') 
 
             elif 'y' in p.keys():
-                whichax = p.get('axis',1)
-                #if whichax == 2 : continue
-                axp = ax2 if whichax ==2 else ax1
 
+                if 'x' in p.keys():
+                    x = p['x'] 
+                else:
+                    x = t
+ 
                 labelstr = p.get('label',None)
                 porder   = p.get('zorder',2)
                 fill     = p.get('fill', False)
                 ydat     = p.get('y',None)
 
+                whichax = p.get('axis',1)
+                if whichax == 3:
+                    if ax3 is None:
+                        ax3 = ax2.twinx()  
+                    axp = ax3
+                            
+                else: 
+                    axp = ax2 if whichax ==2 else ax1
+
+
                 if ydat is None: continue
                 if fill:
-                    axp.plot(t,ydat[0],
+                    axp.plot(x,ydat[0],
                              lw=p.get('lw',2.),\
                              color=p.get('color','black'),\
                              alpha=p.get('fillalpha',0.5),\
                              zorder=porder,\
                              label=labelstr
                              )
-                    axp.fill_between( t, ydat[0], ydat[1],\
+                    axp.fill_between( x, ydat[0], ydat[1],\
                                       lw=p.get('lw',2.),\
                                       color=p.get('color','black'),\
                                       facecolor=p.get('fillcolor','gray'),\
                                       alpha=p.get('fillalpha',0.5),\
                                       zorder=porder
-                                    ) 
-                    Emin.append( min( ydat[0].min(), ydat[1].min() ))
-                    Emax.append( max( ydat[0].max(), ydat[1].max() )) 
+                                    )
+                    if whichax == 1: 
+                        Emin.append( min( ydat[0].min(), ydat[1].min() ))
+                        Emax.append( max( ydat[0].max(), ydat[1].max() )) 
                 else:
-                    axp.plot( t, ydat,\
+                    axp.plot( x, ydat,\
                               lw=p.get('lw',2.),\
                               color=p.get('color','black'),\
                               alpha=p.get('alpha',1.0),\
                               zorder=porder,\
                               label=labelstr
                             )
-                    Emin.append( ydat.min() ) 
-                    Emax.append( ydat.max() ) 
+                    if whichax == 1: 
+                        Emin.append( ydat.min() ) 
+                        Emax.append( ydat.max() )
+                if whichax == 3:
+                    ax3.tick_params(axis='y', colors=p.get('color','black'))
+                #print labelstr
+                #print Emin
+                #print Emax 
                   
-        
-    ax2.legend( bbox_to_anchor=(1.25,1.10), \
-        loc='upper right', numpoints=1, labelspacing=0.2, \
+    if ax3 is not None:
+        ax3.yaxis.set_major_locator( \
+            matplotlib.ticker.MaxNLocator(6, prune='upper') ) 
+
+       
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    handles3, labels3 = ax3.get_legend_handles_labels()
+    handles = handles2 + handles3 
+    labels  = labels2 + labels3
+    ax2.legend( handles, labels,  bbox_to_anchor=(1.25,1.0), \
+        loc='lower right', numpoints=1, labelspacing=0.2, \
          prop={'size':10}, handlelength=1.1, handletextpad=0.5 )
         
         
@@ -697,15 +844,19 @@ def plotLine(  lda0, **kwargs):
     
     
     # Finalize figure
+    x2lims = kwargs.get('x2lims', (lims[0],lims[1])) 
+    ax2.set_xlim( *x2lims )
     y0,y1 = ax2.get_ylim()
-    ax2.set_ylim( y0 , y1 + (y1-y0)*0.1)
+    if y1 == 1. :
+        ax2.set_ylim( y0 , y1 + (y1-y0)*0.05)
 
 
     ymin, ymax =  Emin-0.05*dE, Emax+0.05*dE
 
     Ymin.append(ymin); Ymax.append(ymax); Ax1.append(ax1)
 
-    Ymin = min(Ymin); Ymax = max(Ymax)
+    Ymin = min(Ymin); Ymax = max(Ymax) 
+    print Ymin, Ymax
     for ax in Ax1:
         ax.set_ylim( Ymin, Ymax)
   
@@ -715,14 +866,17 @@ def plotLine(  lda0, **kwargs):
         
     Ax1[0].legend( bbox_to_anchor=(1.1,-0.15), \
         loc='lower left', numpoints=1, labelspacing=0.2,\
-         prop={'size':11}, handlelength=1.1, handletextpad=0.5 )
+         prop={'size':9.5}, handlelength=1.1, handletextpad=0.5 )
         
-    gs3Line.tight_layout(figGS, rect=tightrect)
+    #gs3Line.tight_layout(figGS, rect=tightrect)
     return figGS
 
 
 
 def plotMathy(  lda0, **kwargs):
+    # Flag to ignore errors related to low temperatures beyond the reach
+    # of the htse  
+    ignoreLowT = kwargs.get('ignoreLowT',False)
 
     figGS = plt.figure(figsize=(5.6,4.2))
     gs3Line = matplotlib.gridspec.GridSpec(3,2,\
@@ -749,6 +903,7 @@ def plotMathy(  lda0, **kwargs):
     cutkwargs = kwargs.pop( 'cutkwargs', {} ) 
     cutkwargs['direc'] = direcs[ line_direction ] 
     cutkwargs['ax0label']= labels[ line_direction ]   
+    cutkwargs['extents']= kwargs.pop('extents', 40.)
     t, X,Y,Z, lims = udipole.linecut_points( **cutkwargs ) 
 
 
@@ -801,14 +956,16 @@ def plotMathy(  lda0, **kwargs):
     excbot_XYZ, exctop_XYZ = lda0.pot.firstExcited( X, Y, Z ) 
 
     # Offset the chemical potential for use in the phase diagram
-    localMu_t_XYZ =  ( lda0.globalMu + lda0.Ezero0_111 - Ezero_XYZ ) \
-                      /  tunneling_XYZ
+    localMu_XYZ =  ( lda0.globalMu + lda0.Ezero0_111 - Ezero_XYZ ) 
+                     
 
     # Obtain the thermodynamic quantities
-    density_XYZ = lda0.fHdens( onsite_t_XYZ, localMu_t_XYZ ) 
-    doublon_XYZ = lda0.fHdoub( onsite_t_XYZ, localMu_t_XYZ ) 
-    entropy_XYZ = lda0.fHentr( onsite_t_XYZ, localMu_t_XYZ ) 
-
+    density_XYZ = htse_dens( lda0.T, tunneling_XYZ,  localMu_XYZ, \
+                      onsite_XYZ, ignoreLowT=ignoreLowT ) 
+    doublon_XYZ = htse_doub( lda0.T, tunneling_XYZ,  localMu_XYZ, \
+                      onsite_XYZ, ignoreLowT=ignoreLowT ) 
+    entropy_XYZ = htse_entr( lda0.T, tunneling_XYZ,  localMu_XYZ, \
+                      onsite_XYZ, ignoreLowT=ignoreLowT ) 
 
      
     #--------------------------

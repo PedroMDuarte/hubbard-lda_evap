@@ -1,0 +1,140 @@
+
+001
+===
+
+This one is wrong because there was no proper control for the density
+increasing at large radii.  This could happen for wGR > wIR where there
+can be a bump along the evaporation path.  The chemical potential is 
+set at the height of the bump optimally, but then it exceed the asymptotic
+value of the bottom of the band along a beam.  
+
+
+002
+===
+
+Same problem as 001 
+
+
+003
+===
+
+Same problem as 001.  This one was run with constrained atom number.  N=500,000
+
+
+004
+===
+
+Fixed the issue with the chemical potential for wGR>wIR.  This one is with free atom number 
+
+
+005
+===
+
+Constrained atom number to 500,000.  
+
+
+006
+===
+
+This is a fine sampling if 004 near the waists of interest wIR=60 to 70 um.  Thesea are the waists that will allow us to lock properly. 
+
+
+############
+
+Realized that there was a major issue with the code.   I was taking T/t as constant across the trap, whereas the  raw temperature, T, should have been kept constant.   
+
+This makes the situation a little bit annoying for us because the HTSE only works down to T/t ~ 1.5.   So to have it work all across the trap we need to have a very large T/t in the center.     So basically we cannot use the HTSE to get Mott looking profiles.   
+
+I mitigated this issue by choosing the lda extents to be only +/- 50 um.  At 40 um and 1 per site N = 1.78e6,  so this choice will limit the max atom number.  
+
+############
+
+007
+===
+
+Running with new version of HTSE, which allows making T constant across the trap and having T/t vary dependinng on the local t.
+
+( I believe this one was with T=0.4)
+
+Use EXTENTS=40. 
+
+60um,60um :  g0=4.348, eta=1.34, N=4.16e5, S/N=2.13
+
+008
+===
+
+Use EXTENTS=50. , with T=0.2Er only starts working at wIR=56um.   Using EXTENTS=50. gives pretty similar results for 60um, 60um  
+
+60um,60um :  g0=4.348, eta=1.34, N=4.29e5, S/N=2.25
+
+
+Conclusion is that wIR=wGR  or maybe wGR slightly larger than wIR is the best choice.   Allows for low atom number, low eta, and large S/N.    
+
+Question : how can eta be low with a large beam waist??
+Answer : the potential is shallower.   since it is not quartic it does not have the steep walls.  it tolerates more green.  
+
+Compensation to enlarge the Mott plateau seems a good thing, but for a fixes S/N, the actual entropy in the center is larger for the largest Mott plateau.  So you can get a large Mott plateau, but it is not going to be cold.    
+
+With 4.7e5 atoms waists of 32,27um give a nice large plateau, but with S/N=2.48 at the center one has T/t=9.7 
+
+In contrast, with the 60,60um setup one does not have a nice large plateau, but at the center  T/t=6.6.   
+
+The question is what is more important, T/t<T_N  or n=1 ??  The answer to that should be in Mathy, Huse, Hulet.
+
+
+
+009
+===
+
+Fixed several problems with the code.  Made sure that all the errors were handled properly on the course of optimizing the green compensation value.  After this was done I get results that agree with the analytical calculation, which is good!   
+
+Now I can trust this results in order to make assesments of S/N, eta.   I can also explain why we can get larger beam waists with less atoms:  When you flatten it you need to occupy a large fraction of the beam waist to start going up in energy.  When you don't going along only a smaller fraction of the beam waist already puts you up in evaporation territory.  
+
+This set was run at at T=0.4 Er. 
+
+
+010
+===
+
+This set is run at T=0.4 Er, with the atom number restricted to 500,000 atoms.  
+
+
+Note:  The lattice lock consideration can be written analytically with the series expansion of the bottom of the lowest band.  We will find there that the radius of the sample needs to be a certain fraction of the beam waist in order to be able to lock it up to a certain lattice depth.  With this fraction one can go to the optimization plot and find out what scenario does one get.  
+
+In the end what might be nice would be: 
+
+pick IR beam waist,  pick GR beam waist that makes all things optimal.  Try bragg there.   If other experiments need to be done then change then use the compensation to adjust the fraction of the waist that the sample occupies until it can be locked up properly to 35 Er to do doublon measurements.  
+
+011
+===
+
+This set was using the compensation to obtained a fixed radius fraction.   A radius fraction of 0.32 is necessary to lock the lattice up to 30 Er.   This one was run at T=0.4
+
+012
+=== 
+
+Run the same as 011 but at a lower temperature.  For lower temperatures the extents can be smaller.    
+Used T=0.2, extents=0.55wIR.   T=0.2 corresponds to T/t=5.1 at the center
+
+013
+===
+
+Used T=0.12, extents=0.5wIR.  T=0.12 corresponds to T/t=3.0 at the center.  
+
+014
+===
+
+Used T=0.095, extents0.45wIR.  T=0.095 corresponds to T/t=2.4 at the center.  This one is pretty cold. 
+
+
+015
+===
+
+Made a function that adjust the extents such that I can try making the etaF optimization at a lower temperature.  Back in 009 I did it with T=0.4, but this temperature is too high.  
+
+While running this I adjusted the definition of etastar to correct for 1.4 times the temperature.  It used to be 1.2
+
+Also to be able to reach lower temperatures I excluded values of alpha from 1.10 to 1.20 .  These are the ones that need larger extents because they are well flattened.  
+
+In the end I could run these at T=0.2,  this corresponds to T=5.1t at the center.  
+
