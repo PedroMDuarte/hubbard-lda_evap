@@ -121,6 +121,8 @@ class lda:
         # distribution within the extents 
         self.ignoreExtents = kwargs.get('ignoreExtents',False)
 
+        
+
         # The potential needs to offer a way of calculating the local band 
         # band structure via provided functions.  The following functions
         # and variables must exist:
@@ -224,13 +226,26 @@ class lda:
                 self.globalMu = self.onsite_111.max()/2.
         else :
             self.Number = kwargs.get('Natoms', 3e5)
-            fN = lambda x : self.getNumber(x)- self.Number
+            fN = lambda x : self.getNumber(x,self.T, verbose=False)- self.Number
             if self.verbose:
                 print "Searching for globalMu => N=%.0f, "% self.Number,
-            muBrent = kwargs.get('muBrent', (-1, 6.))
-            self.globalMu, brentResults = \
-                optimize.brentq(fN, muBrent[0], muBrent[1], \
+
+            muBrent = kwargs.get('muBrent', (-1, 2.5)) # Maybe the default
+                                                      # muBrent range should
+                                                      # be U dependent
+            try:
+                self.globalMu, brentResults = \
+                    optimize.brentq(fN, muBrent[0], muBrent[1], \
                                 xtol=1e-2, rtol=2e4, full_output=True) 
+            except Exception as e:
+                errstr  = 'f(a) and f(b) must have different signs'
+                if errstr in e.message:
+                    print "mu0 = %.2f -->  fN = %.2g" % \
+                              (muBrent[0], fN(muBrent[0]) )
+                    print "mu1 = %.2f -->  fN = %.2g" % \
+                              (muBrent[1], fN(muBrent[1]) )
+                raise
+ 
             if self.verbose:
                 print "gMu=%.3f, " % brentResults.root,
                 print "n_iter=%d, " % brentResults.iterations,
@@ -324,25 +339,46 @@ class lda:
         # class can have an easier time calculating the necessary
         # temperature to obtain a certain entropy per particle.
         # This option is provided here: 
-        if 'globalMu' in kwargs.keys() and 'SN' in kwargs.keys(): 
+        if ( 'globalMu' in kwargs.keys() and 'SN' in kwargs.keys() ) \
+             or kwargs.get('forceSN',False): 
             self.SN = kwargs.get('SN', 2.0)
+           
+            # Shut down density extent errors during the search
+            igExt = self.ignoreExtents 
+            self.ignoreExtents = True
             
+ 
             fSN = lambda x : self.getEntropy(x) / \
-                             self.getNumber(self.globalMu, x) \
+                             self.getNumber(self.globalMu, x  ) \
                                 - self.SN
             if self.verbose: 
                 print "Searching for T => S/N=%.2f, "% self.SN
-            TBrent = kwargs.get('TBrent',(0.08,0.4))
+            TBrent = kwargs.get('TBrent',(0.14,1.8))
 
             try:
                 Tres, TbrentResults = \
                     optimize.brentq(fSN, TBrent[0], TBrent[1], \
                                 xtol=2e-3, rtol=2e-3, full_output=True) 
-                print "Brent T result = %.2f Er" % Tres                
+                if self.verbose:
+                    print "Brent T result = %.2f Er" % Tres                
                 self.T = Tres 
-            except:
+            except Exception as e:
+                errstr  = 'f(a) and f(b) must have different signs'
+                if errstr in e.message:
+                    print "T0 = %.3f -->  fSN = %.3f" % \
+                              (TBrent[0], fSN(TBrent[0]) )
+                    print "T1 = %.3f -->  fSN = %.3f" % \
+                              (TBrent[1], fSN(TBrent[1]) )
+                raise
+                
                 print "Search for S/N=%.2f did not converge"%self.SN
                 print "Temperature will be set at T = %.2f Er" % self.T
+                print "ERROR:"
+                print e.message
+                print self.pot.Info()
+                print 
+
+            self.ignoreExtents = igExt
 
 
         # Once the temperature is established we can calculate the ratio
@@ -427,7 +463,7 @@ class lda:
             raise
 
 
-    def getNumber( self, gMu, T, verbose=False):
+    def getNumber( self, gMu, T, **kwargs):
         """ 
         This function calculates and returns the total number of atoms.  
         It integrates along 111 assuming a spherically symmetric sample. 
@@ -437,6 +473,14 @@ class lda:
         gMu         :  global chemical potential
  
         """
+
+        kwverbose = kwargs.get('verbose', None)
+        if kwverbose is not None:
+            NVerbose = kwverbose
+        else:
+            NVerbose = self.verbose
+
+
         gMuZero = self.Ezero0_111 + gMu
         localMu = gMuZero - self.Ezero_111
         localMu_t = localMu / self.tunneling_111
@@ -473,18 +517,20 @@ class lda:
         neg_slope = np.diff( posdens ) > 1e-4
         n_neg_slope = np.sum( neg_slope )
 
+ 
+
 
         if n_neg_slope > 0:  
             msg = "ERROR: Radial density profile along 111 " + \
                   "has a positive slope"
-            if self.verbose:
+            if NVerbose:
                 print msg
                 print "\n\nradius check start = ", radius_check
                 print posdens
                 print np.diff( posdens ) > 1e-4
             if not self.ignoreSlopeErrors:
                 raise ValueError(msg)
-        elif self.verbose:
+        elif NVerbose:
             print "OK: Radial density profile along 111 decreases " + \
                   "monotonically."
         if False:
@@ -492,7 +538,12 @@ class lda:
             print " n_neg_slope = ",n_neg_slope
 
         # Checks that the density goes to zero within the current extents
-        if posdens[-1]/posdens[0] > 2e-2:
+        if kwverbose is not None and kwverbose is False:
+            edgecuttof = 10.
+        else: 
+            edgecuttof = 2e-2
+
+        if posdens[-1]/posdens[0] > edgecuttof:
             msg = "ERROR: Density does not vanish within current " + \
                   "extents"
             if not self.ignoreExtents:
@@ -500,14 +551,20 @@ class lda:
                 print posdens[0]
                 print posdens[-1]
                 print self.pot.g0
-                print "etaF = ", self.EtaEvap
-                print "etaFstar = ", self.etaF_star
-                print "extents = ", self.extents
+                #print "etaF = ", self.EtaEvap
+                #print "etaFstar = ", self.etaF_star
+                #print "extents = ", self.extents
                 raise ValueError(msg)
+            if NVerbose:
+                print msg
+                print posdens[0]
+                print posdens[-1]
+                print self.pot.g0
 
          
         dens = density[~np.isnan(density)]
         r = self.r111[~np.isnan(density)]
+        self.PeakD = dens.max()
         return np.power(self.a,-3)*2*np.pi*integrate.simps(dens*(r**2),r)
 
     def getNumberD( self, T):
@@ -849,6 +906,9 @@ def plotLine(  lda0, **kwargs):
     y0,y1 = ax2.get_ylim()
     if y1 == 1. :
         ax2.set_ylim( y0 , y1 + (y1-y0)*0.05)
+    y2lims = kwargs.get('y2lims', None) 
+    if y2lims is not None:
+        ax2.set_ylim( *y2lims) 
 
 
     ymin, ymax =  Emin-0.05*dE, Emax+0.05*dE
@@ -856,7 +916,7 @@ def plotLine(  lda0, **kwargs):
     Ymin.append(ymin); Ymax.append(ymax); Ax1.append(ax1)
 
     Ymin = min(Ymin); Ymax = max(Ymax) 
-    print Ymin, Ymax
+    #print Ymin, Ymax
     for ax in Ax1:
         ax.set_ylim( Ymin, Ymax)
   

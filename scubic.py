@@ -228,7 +228,7 @@ class sc( udipole.potential) :
         degree polynomial. 
         """
 
-        # Fit the first +/- 15 um of the band bottom to a second order
+        # Fit the first +/- 10 um of the band bottom to a second order
         # polynomial 
         direc100 = (np.pi/2., 0.) 
         direc010 = (np.pi/2., np.pi/2.) 
@@ -237,7 +237,7 @@ class sc( udipole.potential) :
         for d in [direc100, direc010, direc001]: 
             # Make a cut line along d
             td, Xd, Yd, Zd, limsd = \
-                udipole.linecut_points( direc=d, extents = 15.)
+                udipole.linecut_points( direc=d, extents = 4.)
 
             # Obtain band structure along the d direction
             bandbot_d, bandtop_d,  Ezero_d, tunneling_d = \

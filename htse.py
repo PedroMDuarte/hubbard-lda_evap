@@ -5,19 +5,89 @@ the density, double occupancy and entropy
 """
 
 import numpy as np
+import numpy.ma as ma
 
-minTt = 1.3
 
-def htse_dens( T, t, mu, U, ignoreLowT=False, verbose=True ):
-    Tt = np.array(T/t)
-    nerror = np.sum( Tt < minTt )
+minTt = 1.1
+ 
+ 
+def check_valid( T, t, mu, U, ignoreLowT, verbose):
+    """
+    This function is used to enforce the validity limits of the HTSE. 
+
+    Near half filling we have that T/t should be > 1.5, but away from 
+    half filling this does not matter so much. 
+
+    When running the LDA in our small beam waist setup the local value 
+    of t increases as one moves away from the center (the lattice depth 
+    gets shallower).   For fixed T this results in a very low T/t at 
+    the edge.  
+
+    Since the density is n<<1 at the edge then the temperature requirement
+    is not so important there.    
+
+    What this function does is it gets the local T/t profile.  Since the
+    lattice depth decreases monotinically from the center,  T/t does also.  
+
+    Usually the minimum T/t  along the profile is compared to minTt 
+    (defined below)  to check if the HTSE is valid.   
+
+    What this function does is it applies a function to the T/t profile
+    such that it is unchanged  wherever the density is >=1  and it is 
+    boosted up at low densities such that it has a better chance to be 
+    higher than minTt
+    
+    """
+    minTt = 1.2
+
+    boostDelta = 0.9
+    boost = ma.asarray( boostDelta - \
+                        boostDelta*np.exp( -np.abs( ( mu-U/2.)/(3.*U))) ) 
+    boost.mask = mu>U/2.
+    #print boost
+    boost =  boost.filled ( 0. ) 
+
+    Tt = T/t 
+    Tt_ =  Tt + boost
+
+    # Make sure all quantities are arrays with the same dimension
+    if type(Tt) is float:
+        Tt_arr = np.ones_like(Tt_)*Tt
+    else: 
+        Tt_arr = Tt 
+    if type(mu) is float:
+        mu_arr = np.ones_like(Tt_)*mu
+    else:
+        mu_arr = mu 
+    if type(U) is float:
+        U_arr = np.ones_like(Tt_)*U
+    else:
+        U_arr = U 
+     
+
+    np.savetxt('errlog', np.column_stack(( \
+                            Tt_arr, \
+                            boost, \
+                            Tt_ ,\
+                            np.ones_like(Tt_)*minTt, \
+                            mu_arr,\
+                            U_arr) ) ) 
+
+    nerror = np.sum(  Tt_ < minTt )
     if nerror > 0 :
-        msg = "HTSE ERROR: T/t < %.2f =>  min(T/t) = %.2f"% (minTt, Tt.min())
+        msg = "HTSE ERROR: T/t < %.2f =>  min(T/t) = %.2f"% (minTt, Tt_.min())
+        msg = msg + '\nmu0 = %.2f'%mu.max()
+        
         if verbose:
             print msg 
         if not ignoreLowT:
             raise ValueError(msg)
-        
+  
+
+    
+
+def htse_dens( T, t, mu, U, ignoreLowT=False, verbose=True ):
+    check_valid( T, t, mu, U, ignoreLowT,verbose) 
 
     z0  = 2.*np.exp(mu/T)  + np.exp(-U/T + 2.*mu/T)  + 1. 
     
@@ -39,14 +109,7 @@ def htse_dens( T, t, mu, U, ignoreLowT=False, verbose=True ):
     return  term1 + term2 + term3
 
 def htse_doub( T, t, mu, U, ignoreLowT=False, verbose=True):
-    Tt = np.array(T/t)
-    nerror = np.sum( Tt < minTt )
-    if nerror > 0 :
-        msg = "HTSE ERROR: T/t < %.2f =>  min(T/t) = %.2f"% (minTt, Tt.min())
-        if verbose:
-            print msg 
-        if not ignoreLowT:
-            raise ValueError(msg)
+    check_valid( T, t, mu, U, ignoreLowT,verbose) 
  
     z0  = 2.*np.exp(mu/T)  + np.exp(-U/T + 2.*mu/T)  + 1. 
     
@@ -63,7 +126,6 @@ def htse_doub( T, t, mu, U, ignoreLowT=False, verbose=True):
                              *np.exp(-U/T+2.*mu/T) \
                  / z0**3. 
             
-    
     #print z0    
     #print term1
     #print term2
@@ -72,14 +134,7 @@ def htse_doub( T, t, mu, U, ignoreLowT=False, verbose=True):
 
 
 def htse_entr( T, t, mu, U, ignoreLowT=False, verbose=True ):
-    Tt = np.array(T/t)
-    nerror = np.sum( Tt < minTt )
-    if nerror > 0 :
-        msg = "HTSE ERROR: T/t < %.2f =>  min(T/t) = %.2f"% (minTt, Tt.min())
-        if verbose:
-            print msg 
-        if not ignoreLowT:
-            raise ValueError(msg)
+    check_valid( T, t, mu, U, ignoreLowT,verbose) 
  
     z0  = 2.*np.exp(mu/T)  + np.exp(-U/T + 2.*mu/T)  + 1. 
     
