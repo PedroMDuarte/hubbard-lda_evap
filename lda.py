@@ -79,6 +79,7 @@ obtained from the local lattice depth).
 """ 
 
 import udipole
+import scubic
 from mpl_toolkits.mplot3d import axes3d
 
 from scipy import integrate
@@ -261,7 +262,7 @@ class lda:
         # Make a cut line along 100 to calculate the threshold for evaporation
         direc100 = (np.pi/2, 0.) 
         t100, self.X100, self.Y100, self.Z100, lims = \
-            udipole.linecut_points( direc=direc100, extents = 200.)
+            udipole.linecut_points( direc=direc100, extents = 1200.)
 
         # Obtain band structure along the 100 direction
         bandbot_100, bandtop_100,  self.Ezero_100, self.tunneling_100 = \
@@ -277,6 +278,11 @@ class lda:
         # a beam
         self.beamBOT_100 = bandbot_100[-1]
 
+        if self.verbose:
+            #This obtains the value of g0, careful when using anisotropic params
+            scubic.get_max_comp( self.pot, 650., self.T  )  
+
+
         #------------------------------------------------
         # CONTROL THE CHEMICAL POTENTIAL SO THAT IT STAYS 
         # BELOW THE THRESHOLD FOR EVAPORATION
@@ -286,20 +292,26 @@ class lda:
         #   self.globalMuZ0 < self.evapTH0_100  
         # Otherwise the density distribution will spill out into the beams
         # and the assumption of spherical symmetry won't be valid.
-        if self.globalMuZ0 > self.evapTH0_100:
+        if self.globalMuZ0 + self.T*1.2 > self.evapTH0_100:
             msg = "ERROR: Chemical potential exceeds the evaporation threshold "
             if self.verbose:
                 print msg
+                print " mu0 = %.3f" % self.globalMuZ0
+                print "   T = %.3f" % (self.T*1.2)
+                print " Eth = %.3f" % self.evapTH0_100  
             if not self.ignoreMuThreshold : 
                 raise ValueError(msg) 
         elif self.verbose:
             print "OK: Chemical potential is below evaporation threshold."
 
-        if self.globalMuZ0 > self.beamBOT_100:
+        if self.globalMuZ0 + self.T*1.2 > self.beamBOT_100:
             msg = "ERROR: Chemical potential exceeds the bottom of the band " +\
                   "along 100"
             if self.verbose:
                 print msg
+                print " mu0 = %.3f" % self.globalMuZ0
+                print "   T = %.3f" % (self.T*1.2)
+                print "E100 = %.3f" % self.beamBOT_100  
             if not self.ignoreMuThreshold : 
                 raise ValueError(msg) 
         elif self.verbose:
@@ -313,6 +325,7 @@ class lda:
         mu = self.globalMuZ0 - self.LowestE0 
         th = self.evapTH0_100 - self.LowestE0
         self.EtaEvap = th/mu
+        self.DeltaEvap = th - mu
         if False: 
             print "mu global = %.3g" % self.globalMuZ0 
             print "evap th   = %.3g" % self.evapTH0_100
@@ -436,6 +449,7 @@ class lda:
         Slabel = r'$S/N=%.2fk_{\mathrm{B}}$' % ( self.Entropy / self.Number )
         return '\n'.join([rlabel, Nlabel, Dlabel, Slabel]) 
     
+        
    
     def getRadius( self ):
         """
@@ -462,6 +476,24 @@ class lda:
             print posdens 
             raise
 
+
+    def getDensity( self, gMu, T ):
+        """
+        This function calculates and returns the column density along
+        the 111 direction  
+
+        Parameters 
+        ----------
+        gMu         :  global chemical potential
+ 
+        """
+        gMuZero = self.Ezero0_111 + gMu
+        localMu = gMuZero - self.Ezero_111
+        localMu_t = localMu / self.tunneling_111
+        density = htse_dens( T, self.tunneling_111, localMu, \
+                      self.onsite_111, ignoreLowT=self.ignoreLowT, \
+                      verbose=self.verbose)
+        return self.r111 ,  density
 
     def getNumber( self, gMu, T, **kwargs):
         """ 
@@ -593,6 +625,15 @@ class lda:
         r = self.r111[~np.isnan(entropy)]
         return np.power(self.a,-3)*2*np.pi*integrate.simps(entr*(r**2),r)
 
+    def column_density(  self ):
+        """
+        This function calculates and returns the column density of the
+        cloud 
+        """ 
+
+        return None
+        
+
 
 
 def plotLine(  lda0, **kwargs):
@@ -654,7 +695,7 @@ def plotLine(  lda0, **kwargs):
     ax1.xaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(10) ) 
 
     ax1.yaxis.set_major_locator( matplotlib.ticker.MaxNLocator(7) ) 
-    ax1.yaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(1.) ) 
+    ax1.yaxis.set_minor_locator( matplotlib.ticker.AutoMinorLocator() ) 
 
     ax2 = figGS.add_subplot( gs3Line[0,1] )
     ax3 = None
@@ -777,8 +818,11 @@ def plotLine(  lda0, **kwargs):
 
     lattlabel = '\n'.join(  list( lda0.pot.Info() ) + \
                             [lda0.pot.TrapFreqsInfo() + r',\ ' \
-                             + lda0.pot.EffAlpha(), 
-                             '$\eta_{F}=%.2f$'%lda0.EtaEvap] )
+                             + lda0.pot.EffAlpha(), \
+                             '$\eta_{F}=%.2f$'%lda0.EtaEvap + '$,$ ' \
+                             '$\Delta_{F}=%.2fE_{R}$'%lda0.DeltaEvap, \
+                        
+                         ] )
     toplot = toplot + [ {'text':True, 'x': -0.1, 'y':1.02, 'tstring':lattlabel,
                          'ha':'left', 'va':'bottom', 'linespacing':1.4} ]
 
@@ -910,6 +954,10 @@ def plotLine(  lda0, **kwargs):
     if y2lims is not None:
         ax2.set_ylim( *y2lims) 
 
+    y3lims = kwargs.get('y3lims', None)
+    if y3lims is not None:
+        ax3.set_ylim( *y3lims)
+
 
     ymin, ymax =  Emin-0.05*dE, Emax+0.05*dE
 
@@ -938,11 +986,13 @@ def plotMathy(  lda0, **kwargs):
     # of the htse  
     ignoreLowT = kwargs.get('ignoreLowT',False)
 
-    figGS = plt.figure(figsize=(5.6,4.2))
+    scale = 0.9
+    figGS = plt.figure(figsize=(6.0*scale,4.2*scale))
+    #figGS = plt.figure(figsize=(5.6,4.2))
     gs3Line = matplotlib.gridspec.GridSpec(3,2,\
                  width_ratios=[1.6, 1.], height_ratios=[2.2,0.8,1.2],\
                  wspace=0.2, hspace=0.24, 
-                 left = 0.13, right=0.95, bottom=0.14, top=0.84)
+                 left = 0.15, right=0.95, bottom=0.14, top=0.78)
     #tightrect = [0.,0.00, 0.95, 0.88]
 
     Ax1 = []; 
@@ -973,7 +1023,7 @@ def plotMathy(  lda0, **kwargs):
     ax1.grid()
     ax1.grid(which='minor')
     ax1.set_ylabel( lda0.pot.unitlabel, rotation=0, fontsize=16, labelpad=15 )
-    ax1.xaxis.set_major_locator( matplotlib.ticker.MaxNLocator(8) ) 
+    ax1.xaxis.set_major_locator( matplotlib.ticker.MaxNLocator(7) ) 
     #ax1.xaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(20) ) 
 
     ax1.yaxis.set_major_locator( matplotlib.ticker.MaxNLocator(7) ) 
@@ -982,11 +1032,13 @@ def plotMathy(  lda0, **kwargs):
     ax2 = figGS.add_subplot( gs3Line[0,1] )
     ax2.grid()
     #ax2.set_ylabel('$n$', rotation=0, fontsize=14, labelpad=11 )
-    ax2.xaxis.set_major_locator( matplotlib.ticker.MaxNLocator(8) ) 
-    ax2.xaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(10) )
+    ax2.xaxis.set_major_locator( matplotlib.ticker.MaxNLocator(6) ) 
+    #ax2.xaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(10) )
 
     ax3 = figGS.add_subplot( gs3Line[2,0] ) 
     ax3.grid() 
+    ax3.yaxis.set_major_locator( matplotlib.ticker.MaxNLocator(3) ) 
+    ax3.xaxis.set_major_locator( matplotlib.ticker.MaxNLocator(7) ) 
         
 
     #----------------------------------
@@ -996,10 +1048,19 @@ def plotMathy(  lda0, **kwargs):
    
     # In the Mathy plot the x-axis is the local lattice depth
     s0_XYZ = lda0.pot.S0( X, Y, Z)[0] 
+
     ax1.set_xlim( s0_XYZ.min(), s0_XYZ.max() )
-    ax2.set_xlim( s0_XYZ.min(), s0_XYZ.max() )
-    ax3.set_xlabel('$s_{0}\,(E_{R}) $', fontsize=16)
-    ax2.set_xlabel('$s_{0}\,(E_{R}) $', fontsize=14, labelpad=0)
+    ax3.set_xlim( s0_XYZ.min(), s0_XYZ.max() )
+
+
+    x2lims = kwargs.get('x2lims', None) 
+    if x2lims is not None:
+        ax2.set_xlim( *x2lims) 
+    else:
+        ax2.set_xlim( s0_XYZ.min(), s0_XYZ.max() )
+
+    ax3.set_xlabel('$s_{0}\,(E_{R}) $', fontsize=13)
+    ax2.set_xlabel('$s_{0}\,(E_{R}) $', fontsize=12, labelpad=0)
  
     bandbot_XYZ, bandtop_XYZ,  \
     Ezero_XYZ, tunneling_XYZ, onsite_t_XYZ = \
@@ -1011,7 +1072,12 @@ def plotMathy(  lda0, **kwargs):
     Ezero0_XYZ = Ezero_XYZ.min()
 
     bottom = lda0.pot.Bottom( X, Y, Z ) 
-    lattmod = lda0.pot.LatticeMod( X, Y, Z ) 
+    lattmod = lda0.pot.LatticeMod( X, Y, Z )
+
+    Mod = np.amin( lda0.pot.S0( X, Y, Z), axis=0 ) 
+    deltas0 =  ( s0_XYZ.max()-s0_XYZ.min() )
+    lattmod = lda0.pot.Bottom( X, Y, Z ) + \
+        Mod*np.power( np.cos( 2.*np.pi* s0_XYZ *10./deltas0 ), 2)
 
     excbot_XYZ, exctop_XYZ = lda0.pot.firstExcited( X, Y, Z ) 
 
@@ -1059,7 +1125,7 @@ def plotMathy(  lda0, **kwargs):
               'lw':2,'zorder':1.9, 'label':'$\mathrm{evap\ threshold}$'},
              
              #{'y':bottom,'color':'gray', 'lw':0.5,'alpha':0.5, 'axis':3},
-             {'y':lattmod-bottom,'color':'gray', 'lw':1.5,'alpha':0.5, \
+             {'y':lattmod,'color':'gray', 'lw':1.5,'alpha':0.5, \
               'axis':3,\
               'label':r'$\mathrm{lattice\ potential\ \ }\lambda\times10$'} \
              ]  
@@ -1089,17 +1155,23 @@ def plotMathy(  lda0, **kwargs):
              ]
 
     lattlabel = '\n'.join(  list( lda0.pot.Info() ) + \
-                            [lda0.pot.EffAlpha()+\
-                             ', $\eta_{F}=%.2f$'%lda0.EtaEvap] )
+                            [lda0.pot.TrapFreqsInfo() + r',\ ' \
+                             + lda0.pot.EffAlpha(), \
+                             '$\eta_{F}=%.2f$'%lda0.EtaEvap + '$,$ ' \
+                             '$\Delta_{F}=%.2fE_{R}$'%lda0.DeltaEvap, \
+                        
+                         ] )
     toplot = toplot + [ {'text':True, 'x': 0., 'y':1.02, 'tstring':lattlabel,
-                         'ha':'left', 'va':'bottom'} ]
+                         'ha':'left', 'va':'bottom', 'linespacing':1.4} ]
 
     toplot = toplot + [ {'text':True, 'x': 1.0, 'y':1.02, 'tstring':lda0.Info(),
-                         'ha':'right', 'va':'bottom'} ]
+                         'ha':'right', 'va':'bottom', 'linespacing':1.4} ]
  
     toplot = toplot + [ {'text':True, 'x': 0., 'y':1.02, \
                          'tstring':lda0.ThermoInfo(), \
-                         'ha':'left', 'va':'bottom', 'axis':2} ] 
+                         'ha':'left', 'va':'bottom', 'axis':2, \
+                         'linespacing':1.4} ] 
+
 
     #--------------------------
     # ITERATE AND PLOT  
@@ -1124,11 +1196,11 @@ def plotMathy(  lda0, **kwargs):
                 ty = p.get('y', 1.)
                 ha = p.get('ha', 'left')
                 va = p.get('va', 'center')
+                ls = p.get('linespacing', 1.)
                 tstring = p.get('tstring', 'empty') 
 
-                axp.text( tx,ty, tstring, ha=ha, va=va,\
+                axp.text( tx,ty, tstring, ha=ha, va=va, linespacing=ls,\
                     transform=axp.transAxes)
-            
 
             elif 'figprop' in p.keys():
                 figsuptitle = p.get('figsuptitle',  None)
@@ -1215,4 +1287,302 @@ def plotMathy(  lda0, **kwargs):
         
     #gs3Line.tight_layout(figGS, rect=tightrect)
     return figGS
+
+
  
+def CheckInhomog( lda0, **kwargs ):
+    """This function will make a plot along 111 of the model parameters:
+       U, t, U/t, v0.  
+
+       It is useful to assess the degree of inhomogeneity in our system"""
+    
+    # Prepare the figure
+    fig = plt.figure(figsize=(8.,4.2))
+    lattlabel = '\n'.join(  list( lda0.pot.Info() ) )
+    lattlabel = '\n'.join( [ i.split( r'$\mathrm{,}\ $' )[0].replace('s','v')   for i in lda0.pot.Info() ] )
+ 
+    Nlabel = r'$N=%.2f\times 10^{5}$' % (lda0.Number/1e5)
+    Slabel = r'$S/N=%.2fk_{\mathrm{B}}$' % ( lda0.Entropy / lda0.Number )
+    thermolabel =  '\n'.join([Nlabel, Slabel])
+
+    ldainfoA = '\n'.join(lda0.Info().split('\n')[:2])
+    ldainfoB = '\n'.join(lda0.Info().split('\n')[-2:])
+
+ 
+    fig.text( 0.05, 0.98,  lattlabel, ha='left', va='top', linespacing=1.2)
+    fig.text( 0.48, 0.98,  ldainfoA, ha='right', va='top', linespacing=1.2)
+    fig.text( 0.52, 0.98,  ldainfoB, ha='left', va='top', linespacing=1.2)
+    fig.text( 0.95, 0.98,  thermolabel, ha='right', va='top', linespacing=1.2)
+
+    #fig.text( 0.05, 0.86, "Sample is divided in 5 bins, all containing" +\
+    #   " the same number of atoms (see panel 2).\n" + \
+    #   "Average Fermi-Hubbard parameters $n$, $U$, $t$, " +\
+    #   "and $U/t$ are calculated in each bin (see panels 1, 3, 4, 5 )" )
+    
+    gs = matplotlib.gridspec.GridSpec( 2,3, wspace=0.2,\
+             left=0.1, right=0.9, bottom=0.05, top=0.98)
+    
+    # Setup axes
+    axn  = fig.add_subplot(gs[0,0])
+    axnInt = fig.add_subplot(gs[0,1])
+    axU  = fig.add_subplot(gs[0,2])
+    axt  = fig.add_subplot(gs[1,0])
+    axUt = fig.add_subplot(gs[1,1]) 
+    axv0 = fig.add_subplot(gs[1,2])
+
+    # Set xlim
+    x0 = -40.; x1 = 40.
+    axn.set_xlim( x0, x1)
+    axnInt.set_xlim( 0., x1 )
+    axU.set_xlim( x0, x1 )
+    axU.set_ylim( 0., np.amax( lda0.onsite_t_111 * lda0.tunneling_111 *1.05 ) )
+    axt.set_xlim( x0, x1 )
+    axt.set_ylim( 0., 0.3)
+    axUt.set_xlim( x0, x1 )
+    axUt.set_ylim( 0., np.amax( lda0.onsite_t_111 * 1.05 )) 
+    axv0.set_xlim( x0, x1 )
+    
+    lw0 = 2.5
+    # Plot relevant quantities 
+    r111_, density_111 = lda0.getDensity( lda0.globalMu, lda0.T )
+    V0_111 = lda0.pot.S0( lda0.X111, lda0.Y111, lda0.Z111 ) 
+
+    # density     
+    axn.plot( lda0.r111, density_111, lw=lw0 , color='black')
+    # U 
+    axU.plot( lda0.r111, lda0.onsite_t_111 * lda0.tunneling_111 , \
+                  lw=lw0, label='$U$', color='black') 
+    # t 
+    axt.plot( lda0.r111, lda0.tunneling_111,lw=lw0, label='$t$', \
+                  color='black')
+    # U/t 
+    axUt.plot( lda0.r111, lda0.onsite_t_111, lw=lw0, color='black')
+ 
+    # Lattice depth 
+    #print "shape of V0 = ", V0_111.shape
+    axv0.plot( lda0.r111, V0_111[0], lw=lw0, color='black', label='$\mathrm{Lattice\ depth}$')
+
+    # Band gap 
+    bandgap_111 = bands = scubic.bands3dvec( V0_111, NBand=1 )[0] \
+                          - scubic.bands3dvec( V0_111, NBand=0 )[1] 
+    axv0.plot( lda0.r111, bandgap_111, lw=lw0, linestyle=':', color='black', \
+                label='$\mathrm{Band\ gap}$') 
+
+    axv0.legend( bbox_to_anchor=(0.03,0.02), \
+        loc='lower left', numpoints=3, labelspacing=0.2,\
+         prop={'size':6}, handlelength=1.5, handletextpad=0.5 )
+
+
+    # Define function to calculate cummulative atom number
+    def NRadius( Radius ):
+        """
+        This function calculates the fraction of the atom number 
+        up to a certain Radius
+        """
+        valid = np.logical_and( np.abs(lda0.r111) < Radius, \
+                                ~np.isnan(density_111) )
+        r    = lda0.r111[ valid ] 
+        dens = density_111[ valid ] 
+        return np.power( lda0.pot.l/2, -3) * \
+               2 * np.pi*integrate.simps( dens*(r**2), r) / lda0.Number
+    
+    # Plot the cummulative atom number 
+    radii = lda0.r111[ lda0.r111 > 4. ] 
+    NInt = []
+    for radius in radii:
+        NInt.append( NRadius( radius ) ) 
+    NInt = np.array( NInt ) 
+    axnInt.plot( radii, NInt, lw=lw0, color='black') 
+
+   
+    # Define function to numerically solve for y in a pair of x,y arrays     
+    def x_solve( x_array, y_array,  yval ):
+        """  
+        This function solves for x0 in the equation y0=y(x0)  
+        where the function y(x) is defined with data arrays. 
+        """
+        # Convert the array to a function and then solve for y==yval
+        yf = interp1d( x_array, y_array-yval, kind='cubic') 
+        return optimize.brentq( yf, x_array.min(), x_array.max() ) 
+
+    radius1e = x_solve( lda0.r111[ lda0.r111 > 0 ] , \
+                        density_111[ lda0.r111 > 0 ] , \
+                        density_111.max()/np.exp(1.) )
+
+   
+    pos_r111 = lda0.r111[ lda0.r111 > 0 ]  
+    pos_dens111 = density_111[ lda0.r111 > 0 ] 
+ 
+    print pos_dens111.max() 
+    cutoffs = [ 1.20, 1.05, 0.95, 0.75, 0.50, 0.25, 0.00 ]   
+    if pos_dens111.max() < 1.20 :
+        cutoffs = cutoffs[1:] 
+    if pos_dens111.max() < 1.05 : 
+        cutoffs = cutoffs[1:]
+ 
+    nrange0 = [ pos_dens111.max() ] + cutoffs[:-1] 
+    nrange1 = cutoffs 
+    print nrange0
+    print  nrange1
+
+    rbins = [] 
+    for i in range(len(nrange1)-1):
+        if np.any( pos_dens111 > nrange1[i] ): 
+            rbins.append(( (nrange1[i] + nrange0[i])/2., \
+                          x_solve( pos_r111, pos_dens111, nrange1[i] ) ))
+    print rbins
+
+    #-obsolete
+    ## Find the various radii that split the cloud into slots of 20% atom number
+    #rcut = []
+    #for Ncut in [0.2, 0.4, 0.6, 0.8 ]:
+    #    rcut.append( x_solve( radii, NInt, Ncut ) )
+
+    rcut = [ b[1] for b in rbins ] 
+    print " Bins cut radii = ", rcut
+
+    # get the number of atoms in each bin
+    binedges = rcut + [rcut[-1]+20.]    
+    Nbin = []
+    for b in range(len(rcut) + 1 ):
+        if b == 0:
+            Nbin.append( NRadius( binedges[b] ) ) 
+        else:
+            Nbin.append( NRadius(binedges[b]) - NRadius(binedges[b-1]) )
+    Nbin = np.array( Nbin ) 
+    print "Total natoms from adding bins = ", Nbin.sum() 
+    
+      
+
+    # Define functions to average over the shells        
+    def y_average( y_array,  x0, x1):
+        # Average y_array over the radii x0 to x1,  weighted by density 
+        valid = np.logical_and( np.abs(lda0.r111) < 70., ~np.isnan(density_111) )
+        
+        r    = lda0.r111[ valid ] 
+        dens = density_111[ valid ]
+        y    = y_array[ valid ] 
+        
+        shell = np.logical_and( r >= x0, r<x1 ) 
+        r    = r[shell]
+        dens = dens[shell]
+        y    = y[shell] 
+        
+        num = integrate.simps( y* dens*(r**2), r) 
+        den = integrate.simps(  dens*(r**2), r) 
+        return num/den 
+    
+    # Define a function here that makes a piecewise function with the average
+    # values of a quantity so that it can be plotted
+    def binned( x, yqty ):
+        x = np.abs(x)
+        yavg = [] 
+        cond = []
+        for x0,x1 in zip( [0.]+rcut,  rcut+[rcut[-1]+20.]):
+            cond.append(np.logical_and( x >= x0 , x<x1 ) )
+            yavg.append( y_average( yqty, x0, x1) ) 
+        return np.piecewise( x, cond, yavg ), yavg
+
+    # Calculate and plot the binned quantities
+    dens_binned = binned( lda0.r111, density_111 ) 
+    Ut_binned   = binned( lda0.r111, lda0.onsite_t_111 )
+    U_binned    = binned( lda0.r111, lda0.onsite_t_111 * lda0.tunneling_111 )
+    t_binned    = binned( lda0.r111, lda0.tunneling_111 )
+
+    peak_dens = np.amax( density_111 )
+    peak_t = np.amin( lda0.tunneling_111 )
+    
+    axn.fill_between( lda0.r111, dens_binned[0], 0., \
+                      lw=2, color='red', facecolor='red', \
+                      zorder=2, alpha=0.8)
+    axUt.fill_between( lda0.r111, Ut_binned[0],  0., \
+                      lw=2, color='red', facecolor='red', \
+                      zorder=2, alpha=0.8  )
+    axU.fill_between( lda0.r111, U_binned[0], 0., \
+                      lw=2, color='red', facecolor='red',label='$U$', \
+                      zorder=2, alpha=0.8) 
+    axt.fill_between( lda0.r111, t_binned[0], 0., \
+                      lw=2, color='red', facecolor='red',linestyle=':',\
+                      label='$t$', zorder=2, alpha=0.8)
+                     
+       
+    
+    # Set y labels
+    axn.set_ylabel(r'$n$')
+    axnInt.set_ylabel(r'$N_{<R}$')
+    axU.set_ylabel(r'$U\,(E_{R})$')
+    axt.set_ylabel(r'$t\,(E_{R})$')
+    axUt.set_ylabel(r'$U/t$')
+    axv0.set_ylabel(r'$E_{R}$')
+   
+    letters = [\
+               r'\textbf{a}',\
+               r'\textbf{b}',\
+               r'\textbf{c}',\
+               r'\textbf{d}',\
+               r'\textbf{e}',\
+               r'\textbf{f}',\
+              ]
+    for i,ax in enumerate([axn, axnInt, axU, axt, axUt, axv0]):
+        ax.text( 0.08,0.86, letters[i] , transform=ax.transAxes, fontsize=14)
+        ax.yaxis.grid()
+        ax.set_xlabel(r'$\mu\mathrm{m}$')
+        for n,r in enumerate(rcut):
+            if n % 2 == 0:
+                if n == len(rcut)  - 1: 
+                    r2 = 60.
+                else:
+                    r2 = rcut[n+1 ]  
+                ax.axvspan( r, r2, facecolor='lightgray') 
+                if i != 1:
+                    ax.axvspan(-r2, -r, facecolor='lightgray') 
+            ax.axvline( r, lw=1.0, color='gray', zorder=1 )
+            if i != 1:
+                ax.axvline(-r, lw=1.0, color='gray', zorder=1 )
+            
+        ax.xaxis.set_major_locator( matplotlib.ticker.MultipleLocator(20) ) 
+        ax.xaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(10) )
+        
+        #labels = [item.get_text() for item in ax.get_xticklabels()]
+        #print labels
+        #labels = ['' if float(l) % 40 != 0 else l for l in labels ] 
+        #ax.set_xticklabels(labels)
+
+    axnInt.xaxis.set_major_locator( matplotlib.ticker.MultipleLocator(10) ) 
+    axnInt.xaxis.set_minor_locator( matplotlib.ticker.MultipleLocator(5) )
+    
+    # Finalize figure
+    gs.tight_layout(fig, rect=[0.,0.0,1.0,0.94])
+
+    if kwargs.get('closefig', False):
+        plt.close()
+
+    dens_set = np.array( [ b[0] for b in rbins ] + [dens_binned[1][-1]] ) 
+    binresult  = np.column_stack(( 
+                     np.round( Nbin, decimals=3),\
+                     np.round( nrange1, decimals=3),\
+                     np.round( nrange0, decimals=3),\
+                     np.round( dens_binned[1], decimals=2),\
+                     np.round( t_binned[1], decimals=3),\
+                     np.round( U_binned[1], decimals=3),\
+                     np.round( Ut_binned[1], decimals=3) ))
+    print
+
+    from tabulate import tabulate 
+    
+    output =  tabulate(binresult, headers=[\
+           "Atoms in bin", \
+           "n min", \
+           "n max", \
+           "Mean n", \
+           "Mean t", \
+           "Mean U", \
+           "Mean U/t", ]\
+          #, tablefmt="orgtbl", floatfmt='.3f')
+          , tablefmt="latex", floatfmt='.3f')
+
+    print output
+    
+    return fig, binresult,\
+           peak_dens, radius1e, peak_t, output
+        

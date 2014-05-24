@@ -138,3 +138,53 @@ Also to be able to reach lower temperatures I excluded values of alpha from 1.10
 
 In the end I could run these at T=0.2,  this corresponds to T=5.1t at the center.  
 
+
+========================
+
+Revisiting the lattice LDA calculations.   Realized I need to include a metric to measure the distance from the chemical potential to the evaporation threshold.  That may be a more relevant metric for evaporation in the lattice. 
+
+
+016
+===
+
+T=0.4 covering all waists and alpha,  comparable to 009.  
+
+
+017
+===
+
+T=0.2 blocking out regions of alpha near 1.16 so that temperature can be low
+
+
+018
+===
+
+T=0.2  number restricted to 500,000 to be able to discard some regions that require too many atoms to be optimal. 
+(A good balance seems to be alpha_waist = 1.  Need to make line plot for alpha_waist = 1 ) 
+
+
+019
+=== 
+
+Line data at alpha=1 of the same situation as 018, atom number restricted to N=500,000
+
+020
+===
+
+Line data as a function of alpha for fixed waist.   Various temperatures.  Number restricted to N=500,000
+
+
+021
+===
+
+Line data as a function of alpha for fixed waist.   Various temperatures.  Unrestricted number
+
+022
+===
+
+Same as 021 but using as=300a0.  
+
+
+
+
+

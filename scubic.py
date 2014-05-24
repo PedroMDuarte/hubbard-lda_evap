@@ -152,7 +152,11 @@ class sc( udipole.potential) :
         self.m  = kwargs.get('mass', 6.)
         self.w  = kwargs.get('waists', ((47.,47.), (47.,47.), (47.,47.)) )
         self.r  = kwargs.get('retro', (1.,1.,1.) )
+
+        # This alpha is the retro factor, do not confuse with the 
+        # waist ratio 
         self.alpha  = kwargs.get('alpha', (1.,1.,1.) )
+ 
         self.scale = kwargs.get('scale', 10.)
         self.Er0 = udipole.Erecoil(self.l, self.m)
         
@@ -218,7 +222,14 @@ class sc( udipole.potential) :
         """
         freqs  = self.TrapFreqs()
         geomean = (freqs[0]*freqs[1]*freqs[2])**(1./3.)
-        return r'$\bar{\nu} = %d\,\mathrm{Hz}$'%geomean
+        if np.isnan(geomean):
+            return r'$\bar{\nu} = \mathrm{nan}$'
+        try:
+            return r'$\bar{\nu} = %d\,\mathrm{Hz}$'%geomean
+        except:
+            print geomean
+            print type(geomean) 
+            raise
 
 
     def TrapFreqs( self ): 
@@ -467,6 +478,54 @@ class sc( udipole.potential) :
                bands1[1]+self.Bottom(X,Y,Z) 
 
 
-        
+
+def get_max_comp( pot, aS, T ): 
+    """ 
+    This function gets the maximum amount of compensation that will
+    be tolerated by a setup.   
+
+    Parameters 
+    ----------
+    pot    : a potential of class sc 
+    aS     : scattering length
+    T      : temperature in Er
+
+    Returns 
+    -------
+    g0     :  maximum amount of compensation tolerated 
+
+    """
+    g0 = np.abs( pot.greenbeams[0](0.,0.,0.) * pot.unitfactor )
+    s0 = np.abs( pot.beams[0](0.,0.,0.) * pot.unitfactor )
+
+    
+    wL = sum( pot.w, () ) 
+    if len( np.unique( wL )) != 1: 
+        raise ValueError('non-isotropic sample')   
+    wL  = pot.w[0][0]
+
+    wG = sum( pot.GRw, () ) 
+    if len( np.unique( wG )) != 1: 
+        raise ValueError('non-isotropic sample')  
+    wG  = pot.GRw[0][0]
+
+    # First find the depth of the band at the origin
+    bandOrigin = -3.*s0 + ( bands3dvec( np.array([s0,s0,s0]) )[0] + 
+                   bands3dvec( np.array([s0,s0,s0]) )[1] )/2.
+
+    print "bandOrigin = %.2f"% bandOrigin 
+
+    band100 =  bandOrigin / 3. 
+    print "band100 = %.2f" % band100
+    
+    U  = onsite( np.array([s0,s0,s0]) ) * aS 
+    print U/4.
+
+    if wL <= wG:   # alpha < 1
+        # 
+        # bandOrigin + 3*g0 + U/2.  =  band100 + g0  
+        #
+        g0 = (band100 - bandOrigin - U/2. - T*1.2)/2.
+        print "g0 = %.2f" % g0
 
 

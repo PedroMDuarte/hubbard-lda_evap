@@ -115,7 +115,7 @@ def optimal( **kwargs ) :
     ldaOpt = lda.lda( potential = potOpt, Temperature=T_Er, \
                       a_s=a_s, globalMu='halfMott', extents=extents)  
     return [ gOptimal, ldaOpt.EtaEvap, ldaOpt.Number, \
-             ldaOpt.Entropy/ldaOpt.Number, ldaOpt.getRadius(), ldaOpt.getRadius()/wL ]
+             ldaOpt.Entropy/ldaOpt.Number, ldaOpt.getRadius(), ldaOpt.getRadius()/wL,  ldaOpt.DeltaEvap ]
 
 
 def optimal_FixedRadius( **kwargs ) :
@@ -215,7 +215,12 @@ def meshplot( ax, results, i, j, k, contours = None, dashed=None, base=1., **kwa
     xi = np.linspace( x.min(), x.max(), 300)
     yi = np.linspace( y.min(), y.max(), 300)
     zq = matplotlib.mlab.griddata(x, y, z, xi,yi)
-    im0 =ax.pcolormesh( xi, yi, zq , cmap = plt.get_cmap('rainbow'))
+    vlim = kwargs.get('vlim',None)
+    if vlim is None:
+        im0 =ax.pcolormesh( xi, yi, zq , cmap = plt.get_cmap('rainbow'))
+    else:
+        im0 =ax.pcolormesh( xi, yi, zq , cmap = plt.get_cmap('rainbow'),\
+                vmin=vlim[0], vmax=vlim[1])
     plt.axes( ax)
     plt.colorbar(im0) 
 
@@ -331,4 +336,78 @@ def plotOptimal( datfile, **kwargs ) :
     return fig  
     
 
+def plotOptimal_6( datfile, **kwargs ) : 
+ 
+    results = np.loadtxt( datfile )
+ 
+    dashed_eta = kwargs.get('dashed_eta',[{'slope':1.0,'c':'black'}] ) 
+    dashed_delta = kwargs.get('dashed_delta',[{'slope':1.0,'c':'black'}] ) 
+    dashed_g0 = kwargs.get('dashed_g0',[{'slope':1.0,'c':'black'}] ) 
+    dashed_sn = kwargs.get('dashed_sn',[{'slope':1.0,'c':'black'}] ) 
+    dashed_num = kwargs.get('dashed_num',[{'slope':1.0,'c':'black'}] ) 
+    dashed_hwhm = kwargs.get('dashed_hwhm',[{'slope':1.0,'c':'black'}] ) 
+    x0,x1 = kwargs.get('xlim',(44.,80.))
+    y0,y1 = kwargs.get('ylim',(28.,71.))
+    
+        
+    fig = plt.figure(figsize=(12.,6.5))
+    gs  = matplotlib.gridspec.GridSpec(2,3, wspace=0.2, hspace=0.3,\
+            left=0.07, right=0.98, bottom=0.08, top=0.94)
+    
+    
+    eta_contours = kwargs.get('eta_contours', [1.87,2.8, 4.4, 6. ])
+    ax  = fig.add_subplot( gs[0,0] )
+    i=1; j=2; k=4
+    meshplot( ax,results, i, j, k, contours = eta_contours, \
+              dashed=dashed_eta , **kwargs)     
+    ax.set_title('$\eta_{F}$', fontsize=16)
+    ax.set_xlabel('$\mathrm{Lattice\ beam\ waist}\ w_{L}\ (\mu\mathrm{m})$')
+    ax.set_ylabel('$\mathrm{Compensation\ beam\ waist}\ w_{C}\ (\mu\mathrm{m})$')
+
+    delta_contours = kwargs.get('delta_contours', [1.87,2.8, 4.4, 6. ])
+    ax  = fig.add_subplot( gs[0,1] )
+    i=1; j=2; k=9
+    meshplot( ax,results, i, j, k, contours = delta_contours, \
+              dashed=dashed_delta , **kwargs)     
+    ax.set_title('$\Delta_{F}\,(E_{R})$', fontsize=16)
+    ax.set_xlabel('$\mathrm{Lattice\ beam\ waist}\ w_{L}\ (\mu\mathrm{m})$')
+    ax.set_ylabel('$\mathrm{Compensation\ beam\ waist}\ w_{C}\ (\mu\mathrm{m})$')
+
+    g0_contours = kwargs.get('g0_contours', [1.87,2.8, 4.4, 6. ])
+    ax  = fig.add_subplot( gs[0,2] )
+    i=1; j=2; k=3
+    meshplot( ax,results, i, j, k, contours = g0_contours, \
+              dashed=dashed_g0, **kwargs )     
+    ax.set_title('$g_{0}\,(E_{R})$', fontsize=16)
+    ax.set_xlabel('$\mathrm{Lattice\ beam\ waist}\ w_{L}\ (\mu\mathrm{m})$')
+    ax.set_ylabel('$\mathrm{Compensation\ beam\ waist}\ w_{C}\ (\mu\mathrm{m})$')
+   
+    sn_contours = kwargs.get('sn_contours', [1.2, 1.4, 2.4, 3.] ) 
+    ax  = fig.add_subplot( gs[1,0] )
+    i=1; j=2; k=6
+    meshplot( ax,results, i, j, k, contours = sn_contours, \
+              dashed=dashed_sn, **kwargs )     
+    ax.set_title('$S/N\,(k_{\mathrm{B}})$', fontsize=16)
+    ax.set_xlabel('$\mathrm{Lattice\ waist}\ w_{L}\ (\mu\mathrm{m})$')
+    ax.set_ylabel('$\mathrm{Compensation\ waist}\ w_{C}\ (\mu\mathrm{m})$')
+    
+    num_contours = kwargs.get('num_contours', [1.0, 2.0, 3.4, 4.8, 5.8])
+    ax  = fig.add_subplot( gs[1,1] )
+    i=1; j=2;  k=5 
+    meshplot( ax,results, i, j, k, contours = num_contours, \
+              dashed=dashed_num, base=1e5,  **kwargs )     
+    ax.set_title('$N/10^{5}$', fontsize=16)
+    ax.set_xlabel('$\mathrm{Lattice\ waist}\ w_{L}\ (\mu\mathrm{m})$')
+    ax.set_ylabel('$\mathrm{Compensation\ waist}\ w_{C}\ (\mu\mathrm{m})$')
+
+    hwhm_contours = kwargs.get('hwhm_contours', [1.0, 2.0, 3.4, 4.8, 5.8])
+    ax  = fig.add_subplot( gs[1,2] )
+    i=1; j=2;  k=8
+    meshplot( ax,results, i, j, k, contours = hwhm_contours, \
+              dashed=dashed_hwhm, base=1.,  **kwargs )     
+    ax.set_title('$\mathrm{HWHM}/w_{L}$', fontsize=16)
+    ax.set_xlabel('$\mathrm{Lattice\ waist}\ w_{L}\ (\mu\mathrm{m})$')
+    ax.set_ylabel('$\mathrm{Compensation\ waist}\ w_{C}\ (\mu\mathrm{m})$')
+   
+    return fig  
 

@@ -108,7 +108,7 @@ pick IR beam waist,  pick GR beam waist that makes all things optimal.  Try brag
 011
 ===
 
-This set was using the compensation to obtained a fixed radius fraction.   A radius fraction of 0.32 is necessary to lock the lattice up to 30 Er. 
+This set was using the compensation to obtained a fixed radius fraction.   A radius fraction of 0.32 is necessary to lock the lattice up to 30 Er.   This one was run at T=0.4
 
 012
 === 
@@ -137,4 +137,37 @@ While running this I adjusted the definition of etastar to correct for 1.4 times
 Also to be able to reach lower temperatures I excluded values of alpha from 1.10 to 1.20 .  These are the ones that need larger extents because they are well flattened.  
 
 In the end I could run these at T=0.2,  this corresponds to T=5.1t at the center.  
+
+
+========================
+
+Revisiting the lattice LDA calculations.   Realized I need to include a metric to measure the distance from the chemical potential to the evaporation threshold.  That may be a more relevant metric for evaporation in the lattice. 
+
+
+016
+===
+
+T=0.4 covering all waists and alpha,  comparable to 009.  
+
+
+017
+===
+
+T=0.2 blocking out regions of alpha near 1.16 so that temperature can be low
+
+
+018
+===
+
+T=0.2  number restricted to 500,000 to be able to discard some regions that require too many atoms to be optimal. 
+(A good balance seems to be alpha_waist = 1.  Need to make line plot for alpha_waist = 1 ) 
+
+
+019
+=== 
+
+Line data at alpha=1 of the same situation as 018
+
+
+
 
